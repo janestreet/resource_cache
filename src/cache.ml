@@ -793,7 +793,7 @@ module Make(R : Resource_intf) = struct
   let close_and_flush t =
     if not t.close_started then (
       t.close_started <- true;
-      Deferred.all_ignore
+      Deferred.all_unit
         (Global_resource_limiter.close_and_flush t.global_resource_limiter
          :: List.map (Hashtbl.data t.cache) ~f:(fun r ->
            Resource_list.close_and_flush' r;
