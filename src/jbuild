@@ -1,7 +1,6 @@
 (library
  ((name resource_cache)
   (public_name resource_cache)
-  (flags (:standard -safe-string))
   (libraries
    (async
     core
