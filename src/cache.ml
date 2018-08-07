@@ -2,58 +2,11 @@ open Core
 open Async
 
 
-module type Resource_intf = sig
-  module Key  : Identifiable.S
-  module Common_args : T
+include Cache_intf
 
-  type t
-
-  val open_ : Key.t -> Common_args.t -> t Deferred.Or_error.t
-
-  val close : t -> unit Deferred.t
-  val close_finished : t -> unit Deferred.t
-  val is_closed : t -> bool
-end
-
-module Config = struct
-  type t =
-    { max_resources        : int
-    ; idle_cleanup_after   : Time.Span.t
-    ; max_resources_per_id : int
-    ; max_resource_reuse   : int
-    } [@@deriving fields, sexp, bin_io, compare]
-
-  let create = Fields.create
-end
+module Config = Cache_config
 
 module Uid = Unique_id.Int ()
-
-module type Status_intf = sig
-  module Key : Identifiable.S
-
-  module Resource : sig
-    type state = [ `Busy | `Idle | `Closing ] [@@deriving sexp, bin_io, compare]
-
-    type t =
-      { state : state
-      ; since : Time.Span.t
-      } [@@deriving fields, sexp, bin_io, compare]
-  end
-
-  module Resource_list : sig
-    type t =
-      { key               : Key.t
-      ; resources         : Resource.t list
-      ; queue_length      : int
-      ; max_time_on_queue : Time.Span.t option
-      } [@@deriving fields, sexp, bin_io, compare]
-  end
-
-  type t =
-    { resource_lists    : Resource_list.t list
-    ; num_jobs_in_cache : int
-    } [@@deriving fields, sexp, bin_io, compare]
-end
 
 module Make(R : Resource_intf) = struct
   module Status = struct
