@@ -1,6 +1,5 @@
 open! Core
-open Async
-open Resource_cache
+open! Async
 open Expect_test_helpers
 
 module Resource = struct
@@ -23,14 +22,14 @@ module Resource = struct
     Deferred.Or_error.return { status = `Open; close_finished = Ivar.create (); key; id }
   ;;
 
-  let is_closed t =
+  let has_close_started t =
     match t.status with
     | `Open -> false
     | `Closed -> true
   ;;
 
   let close t =
-    if is_closed t
+    if has_close_started t
     then Deferred.unit
     else (
       printf "Closing %d,%d\n" t.key t.id;
@@ -43,10 +42,10 @@ module Resource = struct
   let close_finished t = Ivar.read t.close_finished
 end
 
-module Test_cache = Cache.Make(Resource)
+module Test_cache = Resource_cache.Make(Resource)
 
 let config =
-  { Cache.Config.
+  { Resource_cache.Config.
     max_resources = 2
   ; idle_cleanup_after = Time.Span.day
   ; max_resources_per_id = 1

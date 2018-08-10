@@ -1,12 +1,9 @@
-(library
- ((name resource_cache)
+(library (
+  (name        resource_cache)
   (public_name resource_cache)
-  (libraries
-   (async
-    core
-    ))
-  (preprocess (pps (ppx_jane ppxlib.runner)))
-  ))
+  (preprocess (pps (ppx_jane -annotated-ignores -check-doc-comments ppxlib.runner)))
+  (libraries (async core))))
+
 
 
 (jbuild_version 1)

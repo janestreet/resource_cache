@@ -1,12 +1,11 @@
 open! Core
 open! Async
-open Resource_cache
 
 module Test_cache = Test_cache.Test_cache
 
 let main ~iterations ~duration ~cache_slots =
   let config =
-    { Cache.Config.
+    { Resource_cache.Config.
       max_resources = cache_slots
     ; idle_cleanup_after = Time.Span.day
     ; max_resources_per_id = cache_slots
