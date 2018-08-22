@@ -1,5 +1,6 @@
-open! Core
-open! Async
+open! Core_kernel
+open! Async_kernel
+open! Import
 
 include Resource_cache_intf
 
@@ -14,7 +15,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
 
       type t =
         { state : state
-        ; since : Time.Span.t
+        ; since : Time_ns.Span.t
         }
       [@@deriving fields, sexp, bin_io, compare]
     end
@@ -24,7 +25,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
         { key : Key.t
         ; resources : Resource.t list
         ; queue_length : int
-        ; max_time_on_queue : Time.Span.t option
+        ; max_time_on_queue : Time_ns.Span.t option
         }
       [@@deriving fields, sexp, bin_io, compare]
     end
@@ -44,7 +45,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
     type 'a t
 
     val create
-      :  ?open_timeout:Time.Span.t
+      :  ?open_timeout:Time_ns.Span.t
       -> give_up:unit Deferred.t
       -> f:(R.t -> 'a Deferred.t)
       -> 'a t
@@ -62,9 +63,9 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
 
     val f : 'a t -> R.t -> 'a Deferred.t
 
-    val open_timeout : 'a t -> Time.Span.t option
+    val open_timeout : 'a t -> Time_ns.Span.t option
 
-    val created_at : 'a t -> Time.t
+    val created_at : 'a t -> Time_ns.t
 
     val mark_result_from_available_resource
       :  'a t
@@ -89,8 +90,8 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
           [`Ok of R.Key.t * 'a | `Gave_up_waiting_for_resource | Delayed_failures.t]
             Deferred.t
             Ivar.t
-      ; open_timeout : Time.Span.t option
-      ; created_at : Time.t
+      ; open_timeout : Time_ns.Span.t option
+      ; created_at : Time_ns.t
       }
     [@@deriving fields]
 
@@ -98,7 +99,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
       let result_ivar = Ivar.create () in
       upon give_up (fun () ->
         Ivar.fill_if_empty result_ivar (return `Gave_up_waiting_for_resource));
-      { f; result_ivar; open_timeout; created_at = Time.now () }
+      { f; result_ivar; open_timeout; created_at = Time_ns.now () }
     ;;
 
     let mark_result_from_available_resource t args ~result =
@@ -139,11 +140,12 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
        @see [immediate]. *)
 
     val create
-      :  ?open_timeout:Time.Span.t
+      :  ?open_timeout:Time_ns.Span.t
       -> Config.t
       -> R.Key.t
       -> R.Common_args.t
       -> with_:(R.t -> 'a Deferred.t)
+      -> log_error:(string -> unit)
       -> t * [> `Ok of R.Key.t * 'a | Delayed_failures.t] Deferred.t
 
     val status : t -> Status.Resource.t
@@ -179,10 +181,11 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
       ; args : R.Common_args.t
       ; resource : R.t Set_once.t
       ; mutable state : [`Idle | `In_use_until of unit Ivar.t | `Closing]
-      ; mutable in_state_since : Time.t
+      ; mutable in_state_since : Time_ns.t
       ; config : Config.t
       ; mutable remaining_uses : int
       ; close_finished : unit Ivar.t
+      ; log_error : string -> unit
       }
 
     let equal a b = Uid.equal a.uid b.uid
@@ -194,12 +197,12 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
         | `In_use_until _ -> `Busy
         | `Closing -> `Closing
       in
-      { Status.Resource.state; since = Time.diff (Time.now ()) t.in_state_since }
+      { Status.Resource.state; since = Time_ns.diff (Time_ns.now ()) t.in_state_since }
     ;;
 
     let set_state t state =
       t.state <- state;
-      t.in_state_since <- Time.now ()
+      t.in_state_since <- Time_ns.now ()
     ;;
 
     let close_finished t = Ivar.read t.close_finished
@@ -216,9 +219,9 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
                  if R.has_close_started r then Deferred.unit else R.close r)
              with
              | Ok () -> ()
-             | Error exn -> Log.Global.error !"Exception closing resource: %{Exn}" exn)
+             | Error exn -> t.log_error (sprintf !"Exception closing resource: %{Exn}" exn))
         in
-        match%map Clock.with_timeout (Time.Span.of_sec 10.) closed with
+        match%map Clock_ns.with_timeout (Time_ns.Span.of_sec 10.) closed with
         | `Result () | `Timeout -> Ivar.fill t.close_finished ()
       in
       match t.state with
@@ -251,13 +254,14 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
         else (
           set_state t `Idle;
           Ivar.fill done_ ();
-          Clock.after t.config.idle_cleanup_after
+          Clock_ns.after t.config.idle_cleanup_after
           >>> fun () ->
           match t.state with
           | `Closing | `In_use_until _ -> ()
           | `Idle ->
-            let idle_time = Time.diff (Time.now ()) t.in_state_since in
-            if idle_time >= t.config.idle_cleanup_after then don't_wait_for (close t))
+            let idle_time = Time_ns.diff (Time_ns.now ()) t.in_state_since in
+            if Time_ns.Span.( >= ) idle_time t.config.idle_cleanup_after
+            then don't_wait_for (close t))
     ;;
 
     let unsafe_immediate t ~f =
@@ -277,7 +281,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
            set_idle t;
            res
          | Error exn ->
-           don't_wait_for (close t);
+           don't_wait_for (Deferred.ignore (close t));
            raise exn)
     ;;
 
@@ -295,17 +299,18 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
           `Ok (unsafe_immediate t ~f))
     ;;
 
-    let create ?open_timeout config key args ~with_ =
+    let create ?open_timeout config key args ~with_ ~log_error =
       let t =
         { uid = Uid.create ()
         ; key
         ; args
         ; resource = Set_once.create ()
         ; state = `In_use_until (Ivar.create ())
-        ; in_state_since = Time.now ()
+        ; in_state_since = Time_ns.now ()
         ; config
         ; remaining_uses = config.Config.max_resource_reuse
         ; close_finished = Ivar.create ()
+        ; log_error
         }
       in
       let res =
@@ -316,7 +321,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
             | Some timeout ->
               let resource_ivar = Ivar.create () in
               (match%map
-                 Clock.with_timeout
+                 Clock_ns.with_timeout
                    timeout
                    (let%map r = R.open_ key args in
                     Ivar.fill resource_ivar r;
@@ -361,11 +366,12 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
        up *)
 
     val create_resource
-      :  ?open_timeout:Time.Span.t
+      :  ?open_timeout:Time_ns.Span.t
       -> t
       -> R.Key.t
       -> R.Common_args.t
       -> with_:(R.t -> 'a Deferred.t)
+      -> log_error:(string -> unit)
       -> [ `Ok of Resource.t * [> `Ok of R.Key.t * 'a | Delayed_failures.t] Deferred.t
          | `Cache_is_closed
          | `No_resource_available_until of unit Deferred.t ]
@@ -384,13 +390,13 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
       }
     ;;
 
-    let create_resource ?open_timeout { config; throttle } key args ~with_ =
+    let create_resource ?open_timeout { config; throttle } key args ~with_ ~log_error =
       if Throttle.is_dead throttle
       then `Cache_is_closed
       else if Throttle.num_jobs_running throttle < Throttle.max_concurrent_jobs throttle
       then (
         assert (Throttle.num_jobs_waiting_to_start throttle = 0);
-        let r, v = Resource.create ?open_timeout config key args ~with_ in
+        let r, v = Resource.create ?open_timeout config key args ~with_ ~log_error in
         don't_wait_for (Throttle.enqueue throttle (fun () -> Resource.close_finished r));
         `Ok (r, v))
       else
@@ -408,7 +414,13 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
   module Resource_list : sig
     type t
 
-    val create : Config.t -> Global_resource_limiter.t -> R.Key.t -> R.Common_args.t -> t
+    val create
+      :  Config.t
+      -> Global_resource_limiter.t
+      -> R.Key.t
+      -> R.Common_args.t
+      -> log_error:(string -> unit)
+      -> t
 
     val status : t -> Status.Resource_list.t
 
@@ -435,7 +447,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
       -> [`Immediate of 'a Deferred.t | `None_until of unit Deferred.t]
 
     val create_resource
-      :  ?open_timeout:Time.Span.t
+      :  ?open_timeout:Time_ns.Span.t
       -> t
       -> f:(R.t -> 'a Deferred.t)
       -> [> `Ok of R.Key.t * 'a | Delayed_failures.t] Deferred.t option
@@ -454,12 +466,13 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
       ; trigger_queue_manager : unit Mvar.Read_write.t
       ; mutable close_started : bool
       ; close_finished : unit Ivar.t
+      ; log_error : string -> unit
       }
 
     let status t =
       let max_time_on_queue =
         Queue.peek t.waiting_jobs
-        |> Option.map ~f:(fun (T job) -> Time.diff (Time.now ()) (Job.created_at job))
+        |> Option.map ~f:(fun (T job) -> Time_ns.diff (Time_ns.now ()) (Job.created_at job))
       in
       { Status.Resource_list.key = t.key
       ; resources = List.map t.resources ~f:Resource.status
@@ -491,6 +504,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
             t.key
             t.args
             ~with_:f
+            ~log_error:t.log_error
         with
         | `Cache_is_closed -> None
         | `No_resource_available_until u ->
@@ -559,7 +573,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
       loop ()
     ;;
 
-    let create config global_resource_limiter key args =
+    let create config global_resource_limiter key args ~log_error =
       let t =
         { config
         ; key
@@ -570,6 +584,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
         ; trigger_queue_manager = Mvar.create ()
         ; close_started = false
         ; close_finished = Ivar.create ()
+        ; log_error
         }
       in
       don't_wait_for (start_background_resource_allocator t);
@@ -610,8 +625,8 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
     ; mutable num_jobs_in_cache : int
     ; mutable close_started : bool
     ; close_finished : unit Ivar.t
+    ; log_error : string -> unit
     }
-  [@@deriving fields]
 
   let status t =
     let resource_lists = List.map (Hashtbl.data t.cache) ~f:Resource_list.status in
@@ -620,7 +635,12 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
 
   let get_resource_list t key =
     Hashtbl.find_or_add t.cache key ~default:(fun () ->
-      Resource_list.create t.config t.global_resource_limiter key t.args)
+      Resource_list.create
+        t.config
+        t.global_resource_limiter
+        key
+        t.args
+        ~log_error:t.log_error)
   ;;
 
   let find_any_available_resource t keys ~f =
@@ -707,7 +727,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
     loop ~failed:[] keys
   ;;
 
-  let init ~config args =
+  let init ~config ~log_error args =
     let t =
       { config
       ; global_resource_limiter = Global_resource_limiter.create config
@@ -716,9 +736,10 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
       ; num_jobs_in_cache = 0
       ; close_started = false
       ; close_finished = Ivar.create ()
+      ; log_error
       }
     in
-    Clock.every ~stop:(Ivar.read t.close_finished) config.idle_cleanup_after (fun () ->
+    Clock_ns.every ~stop:(Ivar.read t.close_finished) config.idle_cleanup_after (fun () ->
       Hashtbl.filter_inplace t.cache ~f:(fun d ->
         if Resource_list.is_empty d
         then (
@@ -742,6 +763,8 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
       Ivar.fill t.close_finished ())
     else Ivar.read t.close_finished
   ;;
+
+  let config t = t.config
 
   let close_started t = t.close_started
 

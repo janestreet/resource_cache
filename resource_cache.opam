@@ -9,8 +9,9 @@ build: [
   ["jbuilder" "build" "-p" name "-j" jobs]
 ]
 depends: [
-  "async"
-  "core"
+  "async_kernel"
+  "async_rpc_kernel"
+  "core_kernel"
   "ppx_jane"
   "jbuilder"                {build & >= "1.0+beta18.1"}
   "ocaml-migrate-parsetree" {>= "1.0"}

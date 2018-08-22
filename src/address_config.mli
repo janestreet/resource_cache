@@ -1,8 +1,9 @@
-open! Core
+open! Core_kernel
+open! Import
 
 type t =
   { max_open_connections : int
-  ; cleanup_idle_connection_after : Time.Span.t
+  ; cleanup_idle_connection_after : Time_ns.Span.t
   ; max_connections_per_address : int
   ; max_connection_reuse : int
   }
@@ -10,7 +11,7 @@ type t =
 
 val create
   :  max_open_connections:int
-  -> cleanup_idle_connection_after:Time.Span.t
+  -> cleanup_idle_connection_after:Time_ns.Span.t
   -> max_connections_per_address:int
   -> max_connection_reuse:int
   -> t

@@ -7,7 +7,7 @@ let main ~iterations ~duration ~cache_slots =
   let config =
     { Resource_cache.Config.
       max_resources = cache_slots
-    ; idle_cleanup_after = Time.Span.day
+    ; idle_cleanup_after = Time_ns.Span.day
     ; max_resources_per_id = cache_slots
     ; max_resource_reuse = iterations
     }
@@ -16,7 +16,7 @@ let main ~iterations ~duration ~cache_slots =
   let completed = ref 0 in
   let done_ = Ivar.create () in
   let f _ =
-    let%map () = Clock.after duration in
+    let%map () = Clock_ns.after duration in
     incr completed;
     if !completed = iterations then
       Ivar.fill done_ (Time.now())
@@ -37,8 +37,11 @@ let command =
         flag "-num-jobs" (optional_with_default 10000 int)
           ~doc:"NUM number of jobs to run through cache (default 10000)"
       and duration =
+        let%map duration =
         flag "-duration" (optional_with_default (sec 0.01) time_span)
           ~doc:"SPAN length of each job (default (0.01 sec))"
+        in
+        Time_ns.Span.of_span duration
       and cache_slots =
         flag "-slots" (optional_with_default 10 int)
           ~doc:"NUM number of cache slots (default 10)"
@@ -47,7 +50,7 @@ let command =
         let open Deferred.Let_syntax in
         let lower_bound_runtime =
           Int.to_float ((iterations + cache_slots - 1) / cache_slots) *.
-          Time.Span.to_sec duration
+          Time_ns.Span.to_sec duration
         in
         printf "Lower bound runtime: %f sec\n" lower_bound_runtime;
         let%map time = main ~iterations ~duration ~cache_slots in

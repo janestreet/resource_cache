@@ -1,9 +1,10 @@
-open! Core
-open! Async
+open! Core_kernel
+open! Async_kernel
+open! Import
 
 type t =
   { max_resources : int
-  ; idle_cleanup_after : Time.Span.t
+  ; idle_cleanup_after : Time_ns.Span.t
   ; max_resources_per_id : int
   ; max_resource_reuse : int
   }

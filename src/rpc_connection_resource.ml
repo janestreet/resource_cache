@@ -1,5 +1,6 @@
-open! Core
-open! Async
+open! Core_kernel
+open! Async_kernel
+open! Import
 
 module type Rpc_resource = sig
   type t

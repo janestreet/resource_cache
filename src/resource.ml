@@ -1,5 +1,6 @@
-open! Core
-open! Async
+open! Core_kernel
+open! Async_kernel
+open! Import
 open! Use_eager_deferred
 include Resource_intf
 

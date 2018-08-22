@@ -1,5 +1,6 @@
-open! Core
-open! Async
+open! Core_kernel
+open! Async_kernel
+open! Import
 
 module type S = sig
   type key
@@ -12,7 +13,7 @@ module type S = sig
 
   type t
 
-  val init : config:Config.t -> common_args -> t
+  val init : config:Config.t -> log_error:(string -> unit) -> common_args -> t
 
   val status : t -> Status.t
 
@@ -33,7 +34,7 @@ module type S = sig
       If [f] raises, the exception is not caught, but the [resource] will be
       closed and the [Cache] will remain in a working state (no resources are lost). *)
   val with_
-    :  ?open_timeout:Time.Span.t (** default [None] *)
+    :  ?open_timeout:Time_ns.Span.t (** default [None] *)
     -> ?give_up:unit Deferred.t (** default [Deferred.never] *)
     -> t
     -> key
@@ -42,7 +43,7 @@ module type S = sig
 
   (** Like [with_] but classify the different errors *)
   val with_'
-    :  ?open_timeout:Time.Span.t
+    :  ?open_timeout:Time_ns.Span.t
     -> ?give_up:unit Deferred.t
     -> t
     -> key
@@ -57,7 +58,7 @@ module type S = sig
       (or the first resource that has availability to be opened). Preference is given
       towards those earlier in [args_list] when possible *)
   val with_any
-    :  ?open_timeout:Time.Span.t
+    :  ?open_timeout:Time_ns.Span.t
     -> ?give_up:unit Deferred.t
     -> t
     -> key list
@@ -65,7 +66,7 @@ module type S = sig
     -> (key * 'a) Deferred.Or_error.t
 
   val with_any'
-    :  ?open_timeout:Time.Span.t
+    :  ?open_timeout:Time_ns.Span.t
     -> ?give_up:unit Deferred.t
     -> t
     -> key list
@@ -79,7 +80,7 @@ module type S = sig
   (** Tries [with_any'] in a loop (removing args that have open errors) until receiving an
       [`Ok], or until it has failed to open all resources in [args_list]. *)
   val with_any_loop
-    :  ?open_timeout:Time.Span.t
+    :  ?open_timeout:Time_ns.Span.t
     -> ?give_up:unit Deferred.t
     -> t
     -> key list

@@ -1,5 +1,6 @@
-open! Core
-open! Async
+open! Core_kernel
+open! Async_kernel
+open! Import
 
 module type S = sig
   module Key : Identifiable.S
@@ -9,7 +10,7 @@ module type S = sig
 
     type t =
       { state : state
-      ; since : Time.Span.t
+      ; since : Time_ns.Span.t
       }
     [@@deriving fields, sexp, bin_io, compare]
   end
@@ -19,7 +20,7 @@ module type S = sig
       { key : Key.t
       ; resources : Resource.t list
       ; queue_length : int
-      ; max_time_on_queue : Time.Span.t option
+      ; max_time_on_queue : Time_ns.Span.t option
       }
     [@@deriving fields, sexp, bin_io, compare]
   end

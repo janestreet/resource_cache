@@ -1,8 +1,13 @@
 (library (
   (name        resource_cache)
   (public_name resource_cache)
-  (preprocess (pps (ppx_jane -annotated-ignores -check-doc-comments ppxlib.runner)))
-  (libraries (async core))))
+  (preprocess (
+    pps (
+      ppx_jane
+      -dated-deprecation
+      -annotated-ignores
+      -check-doc-comments ppxlib.runner)))
+  (libraries (async_kernel async_rpc_kernel core_kernel))))
 
 
 

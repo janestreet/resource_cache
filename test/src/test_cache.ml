@@ -42,12 +42,18 @@ module Resource = struct
   let close_finished t = Ivar.read t.close_finished
 end
 
-module Test_cache = Resource_cache.Make(Resource)
+module Test_cache = struct
+  include Resource_cache.Make(Resource)
+  let init ~config k =
+    init ~config ~log_error:(Log.Global.string ~level:`Error) k
+  ;;
+end
+
 
 let config =
   { Resource_cache.Config.
     max_resources = 2
-  ; idle_cleanup_after = Time.Span.day
+  ; idle_cleanup_after = Time_ns.Span.day
   ; max_resources_per_id = 1
   ; max_resource_reuse = 2
   }
@@ -278,7 +284,7 @@ let%expect_test "close_and_flush with empty resource list" =
       Closing 0,7 |}]
   in
   let%bind () =
-    match%map Clock.with_timeout (sec 1.) (close_and_flush t) with
+    match%map Clock_ns.with_timeout (Time_ns.Span.of_sec 1.) (close_and_flush t) with
     | `Timeout -> printf "BUG: TIMEOUT\n"
     | `Result () -> ()
   in
