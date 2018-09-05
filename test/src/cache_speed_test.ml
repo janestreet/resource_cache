@@ -38,7 +38,7 @@ let command =
           ~doc:"NUM number of jobs to run through cache (default 10000)"
       and duration =
         let%map duration =
-        flag "-duration" (optional_with_default (sec 0.01) time_span)
+        flag "-duration" (optional_with_default (sec 0.01) Time.Span.arg_type)
           ~doc:"SPAN length of each job (default (0.01 sec))"
         in
         Time_ns.Span.of_span duration
