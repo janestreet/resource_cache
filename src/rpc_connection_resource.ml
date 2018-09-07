@@ -6,7 +6,6 @@ module type Rpc_resource = sig
   type t
 
   val connect : Host_and_port.t -> t Deferred.Or_error.t
-
   val to_rpc_connection : t -> Rpc.Connection.t
 end
 
@@ -35,7 +34,6 @@ module Make (R : Rpc_resource) = struct
   ;;
 
   let rpc_connection t = R.to_rpc_connection (T.resource t)
-
   let close_finished t = Rpc.Connection.close_finished (rpc_connection t)
 
   let has_close_started t =

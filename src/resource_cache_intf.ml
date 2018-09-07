@@ -4,9 +4,7 @@ open! Import
 
 module type S = sig
   type key
-
   type common_args
-
   type resource
 
   module Status : Status.S with type Key.t = key
@@ -14,9 +12,7 @@ module type S = sig
   type t
 
   val init : config:Config.t -> log_error:(string -> unit) -> common_args -> t
-
   val status : t -> Status.t
-
   val config : t -> Config.t
 
   (** [with_ t key ~f] calls [f resource] where [resource] is either:
@@ -92,7 +88,6 @@ module type S = sig
          Deferred.t
 
   val close_started : t -> bool
-
   val close_finished : t -> unit Deferred.t
 
   (** Close all currently open resources and prevent the creation of new ones. All

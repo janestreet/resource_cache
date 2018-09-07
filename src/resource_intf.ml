@@ -4,28 +4,22 @@ open! Import
 
 module type Simple = sig
   module Key : Identifiable.S
-
   module Common_args : T
 
   type t
 
   val open_ : Key.t -> Common_args.t -> t Or_error.t Deferred.t
-
   val close : t -> unit Deferred.t
 end
 
 module type S = sig
-
   module Key : Identifiable.S
-
   module Common_args : T
 
   type t
 
   val open_ : Key.t -> Common_args.t -> t Deferred.Or_error.t
-
   val close : t -> unit Deferred.t
-
   val close_finished : t -> unit Deferred.t
 
   (** [has_close_started t] should return [true] iff [close t] has been called, even if
@@ -43,9 +37,7 @@ end
 
 module type Resource = sig
   module type S = S
-
   module type S_wrapped = S_wrapped
-
   module type Simple = Simple
 
   (** Wrap a resource that does not natively support a [has_close_started] operation

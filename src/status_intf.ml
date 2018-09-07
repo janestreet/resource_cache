@@ -6,7 +6,11 @@ module type S = sig
   module Key : Identifiable.S
 
   module Resource : sig
-    type state = [`Busy | `Idle | `Closing] [@@deriving sexp, bin_io, compare]
+    type state =
+      [ `Busy
+      | `Idle
+      | `Closing ]
+    [@@deriving sexp, bin_io, compare]
 
     type t =
       { state : state

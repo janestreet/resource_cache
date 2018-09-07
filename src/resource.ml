@@ -28,8 +28,6 @@ module Make_simple (R : Simple) = struct
   ;;
 
   let has_close_started t = Lazy_deferred.is_forced t.close
-
   let close t = Lazy_deferred.force_exn t.close
-
   let close_finished t = Lazy_deferred.wait_exn t.close
 end
