@@ -1,7 +1,7 @@
 open! Core_kernel
 open! Async_kernel
 open! Import
-open! Use_eager_deferred
+open! Eager_deferred.Use
 include Resource_intf
 
 module Make_simple (R : Simple) = struct

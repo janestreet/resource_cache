@@ -7,7 +7,10 @@
       -dated-deprecation
       -annotated-ignores
       -check-doc-comments ppxlib.runner)))
-  (libraries (async_kernel async_rpc_kernel core_kernel))))
+  (libraries (async_kernel
+              async_rpc_kernel
+              core_kernel
+              async_kernel.eager_deferred))))
 
 
 
