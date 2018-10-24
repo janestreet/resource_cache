@@ -3,20 +3,25 @@ open! Async_kernel
 open! Import
 
 module type S = sig
-  module Key : Identifiable.S
+  module Key : sig
+    type t [@@deriving sexp_of]
+
+    include Comparable.S_plain with type t := t
+    include Hashable.S_plain with type t := t
+  end
 
   module Resource : sig
     type state =
       [ `Busy
       | `Idle
       | `Closing ]
-    [@@deriving sexp, bin_io, compare]
+    [@@deriving sexp_of, compare]
 
     type t =
       { state : state
       ; since : Time_ns.Span.t
       }
-    [@@deriving fields, sexp, bin_io, compare]
+    [@@deriving fields, sexp_of, compare]
   end
 
   module Resource_list : sig
@@ -26,14 +31,14 @@ module type S = sig
       ; queue_length : int
       ; max_time_on_queue : Time_ns.Span.t option
       }
-    [@@deriving fields, sexp, bin_io, compare]
+    [@@deriving fields, sexp_of, compare]
   end
 
   type t =
     { resource_lists : Resource_list.t list
     ; num_jobs_in_cache : int
     }
-  [@@deriving fields, sexp, bin_io, compare]
+  [@@deriving fields, sexp_of, compare]
 end
 
 module type Status = sig

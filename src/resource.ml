@@ -21,7 +21,7 @@ module Make_simple (R : Simple) = struct
     let open Deferred.Or_error.Let_syntax in
     let%map underlying =
       Monitor.try_with_join_or_error
-        ~name:(sprintf !"opening resource [%{Key}]" key)
+        ~name:(sprintf !"opening resource [%{sexp:Key.t}]" key)
         (fun () -> R.open_ key common_args)
     in
     { underlying; close = Lazy_deferred.create (fun () -> R.close underlying) }

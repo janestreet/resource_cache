@@ -31,14 +31,14 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
         ; queue_length : int
         ; max_time_on_queue : Time_ns.Span.t option
         }
-      [@@deriving fields, sexp, bin_io, compare]
+      [@@deriving fields, sexp_of, compare]
     end
 
     type t =
       { resource_lists : Resource_list.t list
       ; num_jobs_in_cache : int
       }
-    [@@deriving fields, sexp, bin_io, compare]
+    [@@deriving fields, sexp_of, compare]
   end
 
   module Delayed_failures = struct
@@ -700,7 +700,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
     match%map with_any' ?open_timeout t ?give_up keys ~f with
     | `Ok args_and_res -> Ok args_and_res
     | `Error_opening_resource (key, err) ->
-      let tag = sprintf !"Error creating required resource: %{R.Key}" key in
+      let tag = sprintf !"Error creating required resource: %{sexp:R.Key.t}" key in
       Error (Error.tag ~tag err)
     | `Cache_is_closed -> Or_error.error_string "Cache is closed"
     | `Gave_up_waiting_for_resource ->

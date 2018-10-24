@@ -3,7 +3,13 @@ open! Async_kernel
 open! Import
 
 module type Simple = sig
-  module Key : Identifiable.S
+  module Key : sig
+    type t [@@deriving sexp_of]
+
+    include Comparable.S_plain with type t := t
+    include Hashable.S_plain with type t := t
+  end
+
   module Common_args : T
 
   type t
@@ -13,7 +19,13 @@ module type Simple = sig
 end
 
 module type S = sig
-  module Key : Identifiable.S
+  module Key : sig
+    type t [@@deriving sexp_of]
+
+    include Comparable.S_plain with type t := t
+    include Hashable.S_plain with type t := t
+  end
+
   module Common_args : T
 
   type t
