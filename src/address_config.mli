@@ -7,7 +7,7 @@ type t =
   ; max_connections_per_address : int
   ; max_connection_reuse : int
   }
-[@@deriving sexp, fields, bin_io, compare]
+[@@deriving sexp_of, fields, compare]
 
 val create
   :  max_open_connections:int
@@ -18,3 +18,9 @@ val create
 
 val to_cache_config : t -> Config.t
 val of_cache_config : Config.t -> t
+
+module Stable : sig
+  module V1 : sig
+    type nonrec t = t [@@deriving sexp, bin_io]
+  end
+end

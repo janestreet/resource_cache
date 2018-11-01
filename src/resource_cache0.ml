@@ -1,3 +1,43 @@
+module Stable = struct
+  open! Core_kernel.Core_kernel_stable
+
+  module Resource = struct
+    module V1 = struct
+      type t =
+        { state : [`Busy | `Closing | `Idle]
+        ; since : Time_ns.Span.V2.t
+        }
+      [@@deriving sexp, bin_io]
+    end
+  end
+
+  module type Key = sig
+    type t [@@deriving sexp, bin_io]
+  end
+
+  module Resource_list = struct
+    module V1 = struct
+      type 'key t =
+        { key : 'key
+        ; resources : Resource.V1.t list
+        ; queue_length : int
+        ; max_time_on_queue : Time_ns.Span.V2.t option
+        }
+      [@@deriving sexp, bin_io]
+    end
+  end
+
+  module Status = struct
+    module V1 = struct
+      type 'key t =
+        { resource_lists : 'key Resource_list.V1.t list
+        ; num_jobs_in_cache : int
+        }
+      [@@deriving sexp, bin_io]
+    end
+  end
+end
+
 open! Core_kernel
 open! Async_kernel
 open! Import
@@ -15,30 +55,40 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
         [ `Busy
         | `Idle
         | `Closing ]
-      [@@deriving sexp, bin_io, compare]
+      [@@deriving sexp_of, compare]
 
-      type t =
+      type t = Stable.Resource.V1.t =
         { state : state
         ; since : Time_ns.Span.t
         }
-      [@@deriving fields, sexp, bin_io, compare]
+      [@@deriving fields, sexp_of, compare]
     end
 
     module Resource_list = struct
-      type t =
-        { key : Key.t
+      type 'key t_ = 'key Stable.Resource_list.V1.t =
+        { key : 'key
         ; resources : Resource.t list
         ; queue_length : int
         ; max_time_on_queue : Time_ns.Span.t option
         }
       [@@deriving fields, sexp_of, compare]
+
+      type t = Key.t t_ [@@deriving sexp_of, compare]
     end
 
-    type t =
-      { resource_lists : Resource_list.t list
+    type 'key t_ = 'key Stable.Status.V1.t =
+      { resource_lists : 'key Resource_list.t_ list
       ; num_jobs_in_cache : int
       }
     [@@deriving fields, sexp_of, compare]
+
+    type t = Key.t t_ [@@deriving sexp_of, compare]
+
+    module Make_stable = struct
+      module V1 (Key : Stable.Key with type t = Key.t) = struct
+        type t = Key.t Stable.Status.V1.t [@@deriving sexp, bin_io]
+      end
+    end
   end
 
   module Delayed_failures = struct

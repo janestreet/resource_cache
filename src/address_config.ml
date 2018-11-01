@@ -1,14 +1,28 @@
+module Stable = struct
+  open! Core_kernel.Core_kernel_stable
+
+  module V1 = struct
+    type t =
+      { max_open_connections : int
+      ; cleanup_idle_connection_after : Time_ns.Span.V2.t
+      ; max_connections_per_address : int
+      ; max_connection_reuse : int
+      }
+    [@@deriving sexp, bin_io]
+  end
+end
+
 open! Core_kernel
 open! Async_kernel
 open! Import
 
-type t =
+type t = Stable.V1.t =
   { max_open_connections : int
   ; cleanup_idle_connection_after : Time_ns.Span.t
   ; max_connections_per_address : int
   ; max_connection_reuse : int
   }
-[@@deriving sexp, fields, bin_io, compare]
+[@@deriving sexp_of, fields, compare]
 
 let create = Fields.create
 
