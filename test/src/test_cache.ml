@@ -11,7 +11,8 @@ module Resource = struct
     ; close_finished : unit Ivar.t
     ; key : int
     ; id : int
-    } [@@deriving fields]
+    }
+  [@@deriving fields]
 
   let counter = ref 0
 
@@ -35,28 +36,25 @@ module Resource = struct
       printf "Closing %d,%d\n" t.key t.id;
       t.status <- `Closed;
       Ivar.fill t.close_finished ();
-      Deferred.unit
-    )
+      Deferred.unit)
   ;;
 
   let close_finished t = Ivar.read t.close_finished
 end
 
 module Test_cache = struct
-  include Resource_cache.Make(Resource)
-  let init ~config k =
-    init ~config ~log_error:(Log.Global.string ~level:`Error) k
-  ;;
+  include Resource_cache.Make (Resource)
+
+  let init ~config k = init ~config ~log_error:(Log.Global.string ~level:`Error) k
 end
 
-
 let config =
-  { Resource_cache.Config.
-    max_resources = 2
+  { Resource_cache.Config.max_resources = 2
   ; idle_cleanup_after = Time_ns.Span.day
   ; max_resources_per_id = 1
   ; max_resource_reuse = 2
   }
+;;
 
 let get_resource ?(give_up = Deferred.never ()) ?r_ivar ~f t args =
   let%map result =
@@ -92,21 +90,25 @@ let assert_resource_available' ?r_ivar ?give_up ~f t args =
   r, res
 ;;
 
-let assert_resource_available_now  = assert_resource_available  ~give_up:Deferred.unit
+let assert_resource_available_now = assert_resource_available ~give_up:Deferred.unit
 let assert_resource_available_now' = assert_resource_available' ~give_up:Deferred.unit
 
 let assert_no_resource_available ?give_up t args =
-  match%map get_resource ?give_up ~f:(fun _ -> raise_s [%message "Not possible"]) t args with
+  match%map
+    get_resource ?give_up ~f:(fun _ -> raise_s [%message "Not possible"]) t args
+  with
   | Ok (_, ()) -> raise_s [%message "asserted [with_] would return an error"]
   | Error e -> printf !"Error getting %{sexp: int list}: %{sexp:Error.t}\n" args e
 ;;
 
-let assert_no_resource_available_now = assert_no_resource_available ~give_up:Deferred.unit
+let assert_no_resource_available_now =
+  assert_no_resource_available ~give_up:Deferred.unit
+;;
 
 let close_and_flush t =
   printf "Closing cache\n";
   let%map () = Test_cache.close_and_flush t in
-  printf "Closed cache\n";
+  printf "Closed cache\n"
 ;;
 
 (* 1 resource is allowed per id. Make sure a second one is not created until the
@@ -117,25 +119,24 @@ let%expect_test "respect [max_resources_per_id]" =
   let release_r = Ivar.create () in
   let r_ivar = Ivar.create () in
   don't_wait_for
-    (assert_resource_available_now ~r_ivar ~release:(Ivar.read release_r) t [0]
+    (assert_resource_available_now ~r_ivar ~release:(Ivar.read release_r) t [ 0 ]
      >>| ignore);
   let%bind (_ : Resource.t) = Ivar.read r_ivar in
-  let%bind () =
-    [%expect {|
+  let%bind () = [%expect {|
       Opening 0,0
       Got resource 0,0
-    |}]
-  in
-  let%bind () = assert_no_resource_available_now t [0] in
+    |}] in
+  let%bind () = assert_no_resource_available_now t [ 0 ] in
   let%bind () =
     [%expect {|
       Error getting (0): "Gave up waiting for resource"
     |}]
   in
   Ivar.fill release_r ();
-  let%bind (_ : Resource.t) = assert_resource_available t [0] in
+  let%bind (_ : Resource.t) = assert_resource_available t [ 0 ] in
   let%bind () =
-    [%expect {|
+    [%expect
+      {|
       Releasing resource 0,0
       Got resource 0,0
       Releasing resource 0,0
@@ -149,36 +150,36 @@ let%expect_test "respect [max_resources_per_id]" =
    once one of the previous 2 is closed. *)
 let%expect_test "respect [max_resources]" =
   let t = Test_cache.init ~config () in
-  let%bind r0 = assert_resource_available_now t [0] in
+  let%bind r0 = assert_resource_available_now t [ 0 ] in
   let%bind () =
     [%expect {|
       Opening 0,1
       Got resource 0,1
       Releasing resource 0,1 |}]
   in
-  let%bind r1 = assert_resource_available_now t [1] in
+  let%bind r1 = assert_resource_available_now t [ 1 ] in
   let%bind () =
     [%expect {|
       Opening 1,2
       Got resource 1,2
       Releasing resource 1,2 |}]
   in
-  let%bind () = assert_no_resource_available_now t [2] in
+  let%bind () = assert_no_resource_available_now t [ 2 ] in
   let%bind () =
     [%expect {|
       Error getting (2): "Gave up waiting for resource" |}]
   in
   let r2_ivar = Ivar.create () in
-  don't_wait_for (
-    let%map r2 = assert_resource_available t [2] in
-    Ivar.fill r2_ivar r2
-  );
+  don't_wait_for
+    (let%map r2 = assert_resource_available t [ 2 ] in
+     Ivar.fill r2_ivar r2);
   let%bind () = Resource.close r0 in
   let%bind r2 = Ivar.read r2_ivar in
   let%bind () = Resource.close r2 in
   let%bind () = Resource.close r1 in
   let%bind () =
-    [%expect {|
+    [%expect
+      {|
       Closing 0,1
       Opening 2,3
       Got resource 2,3
@@ -196,34 +197,29 @@ let%expect_test "[with_any] respects order" =
   let t = Test_cache.init ~config () in
   let release_r0 = Ivar.create () in
   let r_ivar = Ivar.create () in
-  don't_wait_for (
-    assert_resource_available_now ~r_ivar ~release:(Ivar.read release_r0) t [0;1]
-    >>| ignore);
+  don't_wait_for
+    (assert_resource_available_now ~r_ivar ~release:(Ivar.read release_r0) t [ 0; 1 ]
+     >>| ignore);
   let%bind (_ : Resource.t) = Ivar.read r_ivar in
-  let%bind () =
-    [%expect {|
+  let%bind () = [%expect {|
       Opening 0,4
-      Got resource 0,4 |}]
-  in
+      Got resource 0,4 |}] in
   let release_r1 = Ivar.create () in
   let r_ivar = Ivar.create () in
-  don't_wait_for (
-    assert_resource_available_now ~r_ivar ~release:(Ivar.read release_r1) t [0;1]
-    >>| ignore);
+  don't_wait_for
+    (assert_resource_available_now ~r_ivar ~release:(Ivar.read release_r1) t [ 0; 1 ]
+     >>| ignore);
   let%bind (_ : Resource.t) = Ivar.read r_ivar in
-  let%bind () =
-    [%expect {|
+  let%bind () = [%expect {|
       Opening 1,5
-      Got resource 1,5 |}]
-  in
-  let%bind () = assert_no_resource_available_now t [0;1] in
-  let%bind () =
-    [%expect {| Error getting (0 1): "Gave up waiting for resource" |}]
-  in
+      Got resource 1,5 |}] in
+  let%bind () = assert_no_resource_available_now t [ 0; 1 ] in
+  let%bind () = [%expect {| Error getting (0 1): "Gave up waiting for resource" |}] in
   Ivar.fill release_r0 ();
-  let%bind (_ : Resource.t) = assert_resource_available t [0;1] in
+  let%bind (_ : Resource.t) = assert_resource_available t [ 0; 1 ] in
   let%bind () =
-    [%expect {|
+    [%expect
+      {|
       Releasing resource 0,4
       Got resource 0,4
       Releasing resource 0,4
@@ -237,16 +233,14 @@ let%expect_test "[f] raises" =
   let%bind () =
     match%map
       Monitor.try_with (fun () ->
-        assert_resource_available_now'
-          ~f:(fun _ -> failwith "failure")
-          t [0])
+        assert_resource_available_now' ~f:(fun _ -> failwith "failure") t [ 0 ])
     with
     | Ok (_r, _res) -> failwith "exn should have been caught"
-    | Error exn ->
-      show_raise ~hide_positions:true (fun () -> raise exn)
+    | Error exn -> show_raise ~hide_positions:true (fun () -> raise exn)
   in
   let%bind () =
-    [%expect {|
+    [%expect
+      {|
       Opening 0,6
       Got resource 0,6
       Closing 0,6
@@ -257,13 +251,11 @@ let%expect_test "[f] raises" =
 
 let%expect_test "close_and_flush with nothing open" =
   let t = Test_cache.init ~config () in
-  let%bind () = close_and_flush t  in
-  let%bind () =
-    [%expect {|
+  let%bind () = close_and_flush t in
+  let%bind () = [%expect {|
       Closing cache
       Closed cache
-    |}]
-  in
+    |}] in
   return ()
 ;;
 
@@ -271,11 +263,12 @@ let%expect_test "close_and_flush with empty resource list" =
   let t = Test_cache.init ~config () in
   let%bind () =
     Deferred.List.iter (List.init config.max_resource_reuse ~f:Fn.id) ~f:(fun _ ->
-      let%map (_ : Resource.t) = assert_resource_available_now t [0] in
+      let%map (_ : Resource.t) = assert_resource_available_now t [ 0 ] in
       ())
   in
   let%bind () =
-    [%expect {|
+    [%expect
+      {|
       Opening 0,7
       Got resource 0,7
       Releasing resource 0,7
@@ -288,12 +281,10 @@ let%expect_test "close_and_flush with empty resource list" =
     | `Timeout -> printf "BUG: TIMEOUT\n"
     | `Result () -> ()
   in
-  let%bind () =
-    [%expect {|
+  let%bind () = [%expect {|
       Closing cache
       Closed cache
-    |}]
-  in
+    |}] in
   return ()
 ;;
 
@@ -301,14 +292,14 @@ let%expect_test "close_and_flush with empty resource list" =
    open new resources *)
 let%expect_test "close_and_flush closes resources" =
   let t = Test_cache.init ~config () in
-  let%bind (_ : Resource.t) = assert_resource_available_now t [0] in
+  let%bind (_ : Resource.t) = assert_resource_available_now t [ 0 ] in
   let%bind () =
     [%expect {|
       Opening 0,8
       Got resource 0,8
       Releasing resource 0,8 |}]
   in
-  let%bind () = close_and_flush t  in
+  let%bind () = close_and_flush t in
   let%bind () =
     [%expect {|
       Closing cache
@@ -316,16 +307,12 @@ let%expect_test "close_and_flush closes resources" =
       Closed cache |}]
   in
   assert (Test_cache.close_started t);
-  let%bind () = assert_no_resource_available_now t [0] in
-  let%bind () =
-    [%expect {|
-      Error getting (0): "Cache is closed" |}]
-  in
-  let%bind () = assert_no_resource_available t [0] in
-  let%bind () =
-    [%expect {|
-      Error getting (0): "Cache is closed" |}]
-  in
+  let%bind () = assert_no_resource_available_now t [ 0 ] in
+  let%bind () = [%expect {|
+      Error getting (0): "Cache is closed" |}] in
+  let%bind () = assert_no_resource_available t [ 0 ] in
+  let%bind () = [%expect {|
+      Error getting (0): "Cache is closed" |}] in
   return ()
 ;;
 
@@ -336,24 +323,22 @@ let%expect_test "close_and_flush clears queue, waits for all jobs to finish" =
   let t = Test_cache.init ~config () in
   let release_r = Ivar.create () in
   let r_ivar = Ivar.create () in
-  don't_wait_for (
-    assert_resource_available_now ~release:(Ivar.read release_r) ~r_ivar t [0]
-    >>| ignore
-  );
+  don't_wait_for
+    (assert_resource_available_now ~release:(Ivar.read release_r) ~r_ivar t [ 0 ]
+     >>| ignore);
   let%bind (_ : Resource.t) = Ivar.read r_ivar in
-  let%bind () =
-    [%expect {|
+  let%bind () = [%expect {|
       Opening 0,9
-      Got resource 0,9 |}]
-  in
-  let waiting_for_0 = assert_no_resource_available t [0] in
+      Got resource 0,9 |}] in
+  let waiting_for_0 = assert_no_resource_available t [ 0 ] in
   let closed_and_flushed = close_and_flush t in
   assert (Test_cache.close_started t);
   let%bind () = waiting_for_0 in
   Ivar.fill release_r ();
   let%bind () = closed_and_flushed in
   let%bind () =
-    [%expect {|
+    [%expect
+      {|
       Closing cache
       Error getting (0): "Cache is closed"
       Releasing resource 0,9
