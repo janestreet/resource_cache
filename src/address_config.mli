@@ -16,6 +16,7 @@ val create
   -> max_connection_reuse:int
   -> t
 
+val default : t
 val to_cache_config : t -> Config.t
 val of_cache_config : Config.t -> t
 

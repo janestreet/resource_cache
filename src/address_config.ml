@@ -26,6 +26,14 @@ type t = Stable.V1.t =
 
 let create = Fields.create
 
+let default =
+  { max_open_connections = 500
+  ; cleanup_idle_connection_after = Time_ns.Span.of_sec 5.
+  ; max_connections_per_address = 10
+  ; max_connection_reuse = 10
+  }
+;;
+
 let to_cache_config t =
   Config.create
     ~max_resources:t.max_open_connections
