@@ -43,7 +43,7 @@ let command =
             (optional_with_default (sec 0.01) Time.Span.arg_type)
             ~doc:"SPAN length of each job (default (0.01 sec))"
         in
-        Time_ns.Span.of_span duration
+        Time_ns.Span.of_span_float_round_nearest duration
       and cache_slots =
         flag
           "-slots"
