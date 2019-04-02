@@ -510,6 +510,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
       -> [> `Ok of R.Key.t * 'a | Delayed_failures.t] Deferred.t option
 
     val enqueue : t -> 'a Job.t -> unit
+    val num_open : t -> int
   end = struct
     type job = T : 'a Job.t -> job
 
@@ -525,6 +526,8 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
       ; close_finished : unit Ivar.t
       ; log_error : string -> unit
       }
+
+    let num_open t = List.length t.resources
 
     let status t =
       let max_time_on_queue =
@@ -709,7 +712,18 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
       | `None_until _ -> None)
   ;;
 
-  let create_any_resource ?open_timeout t keys ~f =
+  let create_any_resource ?open_timeout ~load_balance t keys ~f =
+    let keys =
+      if load_balance
+      then (
+        let num_open key =
+          let res_list = get_resource_list t key in
+          Resource_list.num_open res_list
+        in
+        List.stable_sort keys ~compare:(fun key1 key2 ->
+          Int.compare (num_open key1) (num_open key2)))
+      else keys
+    in
     List.find_map keys ~f:(fun key ->
       let res_list = get_resource_list t key in
       Resource_list.create_resource ?open_timeout res_list ~f)
@@ -723,7 +737,14 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
     Job.result job
   ;;
 
-  let with_any' ?open_timeout ?(give_up = Deferred.never ()) t keys ~f =
+  let with_any'
+        ?open_timeout
+        ?(give_up = Deferred.never ())
+        ?(load_balance = false)
+        t
+        keys
+        ~f
+    =
     let f resource = f (R.underlying resource) in
     t.num_jobs_in_cache <- t.num_jobs_in_cache + 1;
     let result =
@@ -735,7 +756,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
           let%map res = res in
           `Ok (args, res)
         | None ->
-          (match create_any_resource ?open_timeout t keys ~f with
+          (match create_any_resource ?open_timeout ~load_balance t keys ~f with
            | Some res -> res
            | None ->
              if Deferred.is_determined give_up
@@ -746,8 +767,8 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
     result
   ;;
 
-  let with_any ?open_timeout ?give_up t keys ~f =
-    match%map with_any' ?open_timeout t ?give_up keys ~f with
+  let with_any ?open_timeout ?give_up ?load_balance t keys ~f =
+    match%map with_any' ?open_timeout ?give_up ?load_balance t keys ~f with
     | `Ok args_and_res -> Ok args_and_res
     | `Error_opening_resource (key, err) ->
       let tag = sprintf !"Error creating required resource: %{sexp:R.Key.t}" key in
@@ -771,11 +792,11 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
     | `Gave_up_waiting_for_resource -> `Gave_up_waiting_for_resource
   ;;
 
-  let with_any_loop ?open_timeout ?give_up t keys ~f =
+  let with_any_loop ?open_timeout ?give_up ?load_balance t keys ~f =
     let rec loop ~failed = function
       | [] -> return (`Error_opening_all_resources (List.rev failed))
       | keys ->
-        (match%bind with_any' ?open_timeout ?give_up t keys ~f with
+        (match%bind with_any' ?open_timeout ?give_up ?load_balance t keys ~f with
          | (`Ok _ | `Gave_up_waiting_for_resource | `Cache_is_closed) as res -> return res
          | `Error_opening_resource (failed_key, e) ->
            let remaining =

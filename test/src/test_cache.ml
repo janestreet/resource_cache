@@ -45,7 +45,9 @@ end
 module Test_cache = struct
   include Resource_cache.Make (Resource)
 
-  let init ~config k = init ~config ~log_error:(Log.Global.string ~level:`Error) k
+  let init ~config k =
+    init ~config ~log_error:(Log.Global.string ~level:`Error) k
+  ;;
 end
 
 let config =
@@ -56,9 +58,9 @@ let config =
   }
 ;;
 
-let get_resource ?(give_up = Deferred.never ()) ?r_ivar ~f t args =
+let get_resource ?(give_up = Deferred.never ()) ?load_balance ?r_ivar ~f t args =
   let%map result =
-    Test_cache.with_any ~give_up t args ~f:(fun r ->
+    Test_cache.with_any ~give_up ?load_balance t args ~f:(fun r ->
       printf "Got resource %d,%d\n" (Resource.key r) (Resource.id r);
       Option.iter r_ivar ~f:(fun r_ivar -> Ivar.fill r_ivar r);
       f r)
@@ -72,20 +74,27 @@ let r_ivar_or_create r_ivar =
   | Some r_ivar -> r_ivar
 ;;
 
-let assert_resource_available ?(release = Deferred.unit) ?r_ivar ?give_up t args =
+let assert_resource_available
+      ?(release = Deferred.unit)
+      ?r_ivar
+      ?give_up
+      ?load_balance
+      t
+      args
+  =
   let f r =
     let%bind () = release in
     printf "Releasing resource %d,%d\n" (Resource.key r) (Resource.id r);
     Deferred.unit
   in
   let r_ivar = r_ivar_or_create r_ivar in
-  let%bind _, () = get_resource ~r_ivar ?give_up ~f t args >>| ok_exn in
+  let%bind _, () = get_resource ~r_ivar ?give_up ?load_balance ~f t args >>| ok_exn in
   Ivar.read r_ivar
 ;;
 
-let assert_resource_available' ?r_ivar ?give_up ~f t args =
+let assert_resource_available' ?r_ivar ?give_up ?load_balance ~f t args =
   let r_ivar = r_ivar_or_create r_ivar in
-  let%bind res = get_resource ~r_ivar ?give_up ~f t args in
+  let%bind res = get_resource ~r_ivar ?give_up ?load_balance ~f t args in
   let%map r = Ivar.read r_ivar in
   r, res
 ;;
@@ -346,4 +355,121 @@ let%expect_test "close_and_flush clears queue, waits for all jobs to finish" =
       Closed cache |}]
   in
   return ()
+;;
+
+(* [with_any] and [max_resource_imbalance] should ensure that resources are distributed
+   more evenly. *)
+let test_imbalance ~load_balance =
+  let t =
+    Test_cache.init
+      ~config:
+        { max_resources = 10
+        ; max_resources_per_id = 5
+        ; max_resource_reuse = 1
+        ; idle_cleanup_after = Time_ns.Span.day
+        }
+      ()
+  in
+  let%bind () =
+    List.init 10 ~f:(fun (_ : int) ->
+      assert_resource_available_now ~load_balance t [ 0; 1; 2; 3 ] >>| ignore)
+    |> Deferred.all_unit
+  in
+  close_and_flush t
+;;
+
+let%expect_test "imbalanced resources" =
+  let%bind () = test_imbalance ~load_balance:false in
+  [%expect
+    {|
+    Opening 0,10
+    Opening 0,11
+    Opening 0,12
+    Opening 0,13
+    Opening 0,14
+    Opening 1,15
+    Opening 1,16
+    Opening 1,17
+    Opening 1,18
+    Opening 1,19
+    Got resource 0,10
+    Got resource 0,11
+    Got resource 0,12
+    Got resource 0,13
+    Got resource 0,14
+    Got resource 1,15
+    Got resource 1,16
+    Got resource 1,17
+    Got resource 1,18
+    Got resource 1,19
+    Releasing resource 0,10
+    Releasing resource 0,11
+    Releasing resource 0,12
+    Releasing resource 0,13
+    Releasing resource 0,14
+    Releasing resource 1,15
+    Releasing resource 1,16
+    Releasing resource 1,17
+    Releasing resource 1,18
+    Releasing resource 1,19
+    Closing 0,10
+    Closing 0,11
+    Closing 0,12
+    Closing 0,13
+    Closing 0,14
+    Closing 1,15
+    Closing 1,16
+    Closing 1,17
+    Closing 1,18
+    Closing 1,19
+    Closing cache
+    Closed cache |}]
+;;
+
+let%expect_test "balanced resources" =
+  let%bind () = test_imbalance ~load_balance:true in
+  [%expect
+    {|
+    Opening 0,20
+    Opening 1,21
+    Opening 2,22
+    Opening 3,23
+    Opening 0,24
+    Opening 1,25
+    Opening 2,26
+    Opening 3,27
+    Opening 0,28
+    Opening 1,29
+    Got resource 0,20
+    Got resource 1,21
+    Got resource 2,22
+    Got resource 3,23
+    Got resource 0,24
+    Got resource 1,25
+    Got resource 2,26
+    Got resource 3,27
+    Got resource 0,28
+    Got resource 1,29
+    Releasing resource 0,20
+    Releasing resource 1,21
+    Releasing resource 2,22
+    Releasing resource 3,23
+    Releasing resource 0,24
+    Releasing resource 1,25
+    Releasing resource 2,26
+    Releasing resource 3,27
+    Releasing resource 0,28
+    Releasing resource 1,29
+    Closing 0,20
+    Closing 1,21
+    Closing 2,22
+    Closing 3,23
+    Closing 0,24
+    Closing 1,25
+    Closing 2,26
+    Closing 3,27
+    Closing 0,28
+    Closing 1,29
+    Closing cache
+    Closed cache |}]
 ;;

@@ -51,11 +51,16 @@ module type S = sig
          Deferred.t
 
   (** Like [with_] and [with_'] except [f] is run on the first matching available resource
-      (or the first resource that has availability to be opened). Preference is given
-      towards those earlier in [args_list] when possible *)
+      (or the first resource that has availability to be opened).
+
+      Preference is given towards resources earlier in the list, unless
+      [~load_balance:true] has been specified, in which case preference is given to ensure
+      that load is approximately balanced. The key with the least number of open
+      connections will be favored. *)
   val with_any
     :  ?open_timeout:Time_ns.Span.t
     -> ?give_up:unit Deferred.t
+    -> ?load_balance:bool
     -> t
     -> key list
     -> f:(resource -> 'a Deferred.t)
@@ -64,6 +69,7 @@ module type S = sig
   val with_any'
     :  ?open_timeout:Time_ns.Span.t
     -> ?give_up:unit Deferred.t
+    -> ?load_balance:bool
     -> t
     -> key list
     -> f:(resource -> 'a Deferred.t)
@@ -78,6 +84,7 @@ module type S = sig
   val with_any_loop
     :  ?open_timeout:Time_ns.Span.t
     -> ?give_up:unit Deferred.t
+    -> ?load_balance:bool
     -> t
     -> key list
     -> f:(resource -> 'a Deferred.t)
