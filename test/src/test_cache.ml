@@ -55,6 +55,7 @@ let config =
   ; idle_cleanup_after = Time_ns.Span.day
   ; max_resources_per_id = 1
   ; max_resource_reuse = 2
+  ; close_idle_resources_when_at_limit = false
   }
 ;;
 
@@ -367,6 +368,7 @@ let test_imbalance ~load_balance =
         ; max_resources_per_id = 5
         ; max_resource_reuse = 1
         ; idle_cleanup_after = Time_ns.Span.day
+        ; close_idle_resources_when_at_limit = false
         }
       ()
   in
@@ -472,4 +474,76 @@ let%expect_test "balanced resources" =
     Closing 1,29
     Closing cache
     Closed cache |}]
+;;
+
+module Open_resource = struct
+  type t =
+    { resource : Resource.t Deferred.t
+    ; release : unit -> unit
+    ; released : unit Deferred.t
+    }
+
+  let create ?(now = false) t ids =
+    let f =
+      if now
+      then assert_resource_available ~give_up:Deferred.unit
+      else assert_resource_available ?give_up:None
+    in
+    let resource_ivar = Ivar.create () in
+    let release_ivar = Ivar.create () in
+    let released =
+      f ~r_ivar:resource_ivar ~release:(Ivar.read release_ivar) t ids
+      >>| (ignore : Resource.t -> unit)
+    in
+    let resource = Ivar.read resource_ivar in
+    let release () = Ivar.fill release_ivar () in
+    { resource; release; released }
+  ;;
+end
+
+let%expect_test "close idle resources when at limit" =
+  Resource.counter := 0;
+  let config =
+    { Resource_cache.Config.max_resources = 2
+    ; idle_cleanup_after = Time_ns.Span.day
+    ; max_resources_per_id = 2
+    ; max_resource_reuse = 2
+    ; close_idle_resources_when_at_limit = true
+    }
+  in
+  let t = Test_cache.init ~config () in
+  let r0_0 = Open_resource.create ~now:true t [ 0 ] in
+  let%bind r0_0_resource = r0_0.resource in
+  let r0_1 = Open_resource.create ~now:true t [ 0 ] in
+  let%bind r0_1_resource = r0_1.resource in
+  r0_0.release ();
+  let%bind () = r0_0.released in
+  r0_1.release ();
+  let%bind () = r0_1.released in
+  (* There are 2 idle resources. [r0_0] is the least recently used. Trying to get a
+     resource with key 1 results in closing [r0_0] to make room. *)
+  let r1_0 = Open_resource.create t [ 1 ] in
+  let%bind () = Resource.close_finished r0_0_resource in
+  let%bind (_ : Resource.t) = r1_0.resource in
+  (* Now we close [r0_1] to make room. *)
+  let r1_1 = Open_resource.create t [ 1 ] in
+  let%bind () = Resource.close_finished r0_1_resource in
+  let%bind (_ : Resource.t) = r1_1.resource in
+  let%bind () =
+    [%expect
+      {|
+    Opening 0,0
+    Got resource 0,0
+    Opening 0,1
+    Got resource 0,1
+    Releasing resource 0,0
+    Releasing resource 0,1
+    Closing 0,0
+    Opening 1,2
+    Got resource 1,2
+    Closing 0,1
+    Opening 1,3
+    Got resource 1,3 |}]
+  in
+  return ()
 ;;

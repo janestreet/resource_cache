@@ -41,8 +41,6 @@ end
 open! Core_kernel
 open! Async_kernel
 open! Import
-
-
 include Resource_cache_intf
 module Uid = Unique_id.Int ()
 
@@ -179,7 +177,17 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
      It will trigger [close] once the [max_resource_reuse] or [idle_cleanup_after] are
      exceeded. *)
   module Resource : sig
+    module State : sig
+      type t =
+        [ `Idle
+        | `In_use_until of unit Ivar.t
+        | `Closing ]
+    end
+
     type t
+
+    val equal : t -> t -> bool
+    val uid : t -> Uid.t
 
     (* [create] will immediately produce a [Resource.t] that is initially
        busy with:
@@ -193,6 +201,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
 
     val create
       :  ?open_timeout:Time_ns.Span.t
+      -> ?on_state_update:(t -> State.t -> unit)
       -> Config.t
       -> R.Key.t
       -> R.Common_args.t
@@ -224,23 +233,30 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
       -> [ `Ok of 'a Deferred.t
          | `Resource_unavailable_until of unit Deferred.t
          | `Resource_closed ]
-
-    val equal : t -> t -> bool
   end = struct
+    module State = struct
+      type t =
+        [ `Idle
+        | `In_use_until of unit Ivar.t
+        | `Closing ]
+    end
+
     type t =
       { uid : Uid.t
       ; key : R.Key.t
       ; args : R.Common_args.t
       ; resource : R.t Set_once.t
-      ; mutable state : [`Idle | `In_use_until of unit Ivar.t | `Closing]
+      ; mutable state : State.t
       ; mutable in_state_since : Time_ns.t
       ; config : Config.t
       ; mutable remaining_uses : int
       ; close_finished : unit Ivar.t
+      ; on_state_update : (t -> State.t -> unit) option
       ; log_error : string -> unit
       }
 
     let equal a b = Uid.equal a.uid b.uid
+    let uid t = t.uid
 
     let status t =
       let state =
@@ -253,6 +269,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
     ;;
 
     let set_state t state =
+      Option.iter t.on_state_update ~f:(fun f -> f t state);
       t.state <- state;
       t.in_state_since <- Time_ns.now ()
     ;;
@@ -353,7 +370,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
           `Ok (unsafe_immediate t ~f))
     ;;
 
-    let create ?open_timeout config key args ~with_ ~log_error =
+    let create ?open_timeout ?on_state_update config key args ~with_ ~log_error =
       let t =
         { uid = Uid.create ()
         ; key
@@ -364,6 +381,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
         ; config
         ; remaining_uses = config.Config.max_resource_reuse
         ; close_finished = Ivar.create ()
+        ; on_state_update
         ; log_error
         }
       in
@@ -410,6 +428,58 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
     ;;
   end
 
+  module Idle_resource_tracker : sig
+    type t
+
+    val create : unit -> t
+    val close_least_recently_used : t -> unit
+
+    val on_resource_state_update
+      :  t
+      -> (Resource.t -> [`Idle | `In_use_until of unit Ivar.t | `Closing] -> unit)
+           Staged.t
+  end = struct
+    module Lru = Hash_queue.Make (Uid)
+
+    type t = Resource.t Lru.t
+
+    let create () = Lru.create ()
+
+    let enqueue t resource =
+      let uid = Resource.uid resource in
+      match Lru.enqueue_back t uid resource with
+      | `Ok -> ()
+      | `Key_already_present ->
+        (* This shouldn't happen, but this is the logical thing to do. *)
+        ignore (Lru.lookup_and_move_to_back_exn t uid : Resource.t)
+    ;;
+
+    let remove t resource =
+      match Lru.remove t (Resource.uid resource) with
+      | `Ok -> ()
+      | `No_such_key ->
+        (* This can occur because [close_least_recently_used] removes from the queue and
+           a subsequent state update comes later. *)
+        ()
+    ;;
+
+    let close_least_recently_used t =
+      (* Explicitly dequeue so another call to [close_least_recently_used] before the
+         resource's [on_state_update] fires will choose a different resource. *)
+      match Lru.dequeue_front t with
+      | Some resource ->
+        don't_wait_for (Resource.close_when_idle resource);
+        ()
+      | None -> ()
+    ;;
+
+    let on_resource_state_update t =
+      stage (fun resource -> function
+        | `Idle -> enqueue t resource
+        | `In_use_until _ | `Closing -> remove t resource)
+    ;;
+  end
+
   (* Limit the number of concurrent [Resource.t]s globally *)
   module Global_resource_limiter : sig
     type t
@@ -430,15 +500,21 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
          | `Cache_is_closed
          | `No_resource_available_until of unit Deferred.t ]
 
+    val maybe_close_least_recently_used : t -> unit
     val close_and_flush : t -> unit Deferred.t
   end = struct
     type t =
       { config : Config.t
+      ; idle_resource_tracker : Idle_resource_tracker.t option
       ; throttle : unit Throttle.t
       }
 
     let create config =
       { config
+      ; idle_resource_tracker =
+          (if config.close_idle_resources_when_at_limit
+           then Some (Idle_resource_tracker.create ())
+           else None)
       ; throttle =
           Throttle.create
             ~continue_on_error:true
@@ -446,19 +522,45 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
       }
     ;;
 
-    let create_resource ?open_timeout { config; throttle } key args ~with_ ~log_error =
-      if Throttle.is_dead throttle
+    let capacity_available_now t =
+      Throttle.num_jobs_running t.throttle < Throttle.max_concurrent_jobs t.throttle
+    ;;
+
+    let create_resource ?open_timeout t key args ~with_ ~log_error =
+      if Throttle.is_dead t.throttle
       then `Cache_is_closed
-      else if Throttle.num_jobs_running throttle < Throttle.max_concurrent_jobs throttle
+      else if capacity_available_now t
       then (
-        assert (Throttle.num_jobs_waiting_to_start throttle = 0);
-        let r, v = Resource.create ?open_timeout config key args ~with_ ~log_error in
-        don't_wait_for (Throttle.enqueue throttle (fun () -> Resource.close_finished r));
+        assert (Throttle.num_jobs_waiting_to_start t.throttle = 0);
+        let on_state_update =
+          Option.map t.idle_resource_tracker ~f:(fun tracker ->
+            unstage (Idle_resource_tracker.on_resource_state_update tracker))
+        in
+        let r, v =
+          Resource.create
+            ?open_timeout
+            ?on_state_update
+            t.config
+            key
+            args
+            ~with_
+            ~log_error
+        in
+        don't_wait_for
+          (Throttle.enqueue t.throttle (fun () -> Resource.close_finished r));
         `Ok (r, v))
       else
         `No_resource_available_until
           (Deferred.any
-             [ Throttle.capacity_available throttle; Throttle.cleaned throttle ])
+             [ Throttle.capacity_available t.throttle; Throttle.cleaned t.throttle ])
+    ;;
+
+    let maybe_close_least_recently_used t =
+      match t.idle_resource_tracker with
+      | None -> ()
+      | Some tracker ->
+        if not (capacity_available_now t)
+        then Idle_resource_tracker.close_least_recently_used tracker
     ;;
 
     let close_and_flush t =
@@ -759,6 +861,8 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
           (match create_any_resource ?open_timeout ~load_balance t keys ~f with
            | Some res -> res
            | None ->
+             Global_resource_limiter.maybe_close_least_recently_used
+               t.global_resource_limiter;
              if Deferred.is_determined give_up
              then return `Gave_up_waiting_for_resource
              else enqueue_all ?open_timeout ~give_up t keys ~f))

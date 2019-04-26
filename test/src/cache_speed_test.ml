@@ -2,12 +2,13 @@ open! Core
 open! Async
 module Test_cache = Test_cache.Test_cache
 
-let main ~iterations ~duration ~cache_slots =
+let main ~iterations ~duration ~cache_slots ~close_idle_resources_when_at_limit =
   let config =
     { Resource_cache.Config.max_resources = cache_slots
     ; idle_cleanup_after = Time_ns.Span.day
     ; max_resources_per_id = cache_slots
     ; max_resource_reuse = iterations
+    ; close_idle_resources_when_at_limit
     }
   in
   let t = Test_cache.init ~config () in
@@ -49,6 +50,11 @@ let command =
           "-slots"
           (optional_with_default 10 int)
           ~doc:"NUM number of cache slots (default 10)"
+      and close_idle_resources_when_at_limit =
+        flag
+          "-close-idle-resources-when-at-limit"
+          no_arg
+          ~doc:" pass through this value to the cache config"
       in
       fun () ->
         let open Deferred.Let_syntax in
@@ -57,6 +63,8 @@ let command =
           *. Time_ns.Span.to_sec duration
         in
         printf "Lower bound runtime: %f sec\n" lower_bound_runtime;
-        let%map time = main ~iterations ~duration ~cache_slots in
+        let%map time =
+          main ~iterations ~duration ~cache_slots ~close_idle_resources_when_at_limit
+        in
         printf "Runtime: %f sec\n" (Time.Span.to_sec time)]
 ;;
