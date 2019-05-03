@@ -125,7 +125,7 @@ module type Resource_cache = sig
       - No more than [max_resources] are open simultaneously
       - No more than [max_resources_per_id] are open simultaneously for a given id (args)
   *)
-  module Make (R : Resource.S) :
+  module Make (R : Resource.S) () :
     S
     with type key := R.Key.t
      and type common_args := R.Common_args.t
@@ -133,7 +133,7 @@ module type Resource_cache = sig
 
   (** Wrap a resource that does not natively support a [has_close_started] operation
       in a simple record to add such tracking. *)
-  module Make_simple (R : Resource.Simple) :
+  module Make_simple (R : Resource.Simple) () :
     S
     with type key := R.Key.t
      and type common_args := R.Common_args.t
@@ -141,7 +141,7 @@ module type Resource_cache = sig
 
   (** Make a cache from a resource where the type clients wish to operate on is
       derived from, but not necessarily equal to, the type held by the cache. *)
-  module Make_wrapped (R : Resource.S_wrapped) :
+  module Make_wrapped (R : Resource.S_wrapped) () :
     S
     with type key := R.Key.t
      and type common_args := R.Common_args.t

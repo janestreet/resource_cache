@@ -42,9 +42,8 @@ open! Core_kernel
 open! Async_kernel
 open! Import
 include Resource_cache_intf
-module Uid = Unique_id.Int ()
 
-module Make_wrapped (R : Resource.S_wrapped) = struct
+module Make_wrapped (R : Resource.S_wrapped) () = struct
   module Status = struct
     module Key = R.Key
 
@@ -177,6 +176,8 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
      It will trigger [close] once the [max_resource_reuse] or [idle_cleanup_after] are
      exceeded. *)
   module Resource : sig
+    module Id : Unique_id.Id
+
     module State : sig
       type t =
         [ `Idle
@@ -186,8 +187,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
 
     type t
 
-    val equal : t -> t -> bool
-    val uid : t -> Uid.t
+    val id : t -> Id.t
 
     (* [create] will immediately produce a [Resource.t] that is initially
        busy with:
@@ -234,6 +234,8 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
          | `Resource_unavailable_until of unit Deferred.t
          | `Resource_closed ]
   end = struct
+    module Id = Unique_id.Int ()
+
     module State = struct
       type t =
         [ `Idle
@@ -242,7 +244,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
     end
 
     type t =
-      { uid : Uid.t
+      { id : Id.t
       ; key : R.Key.t
       ; args : R.Common_args.t
       ; resource : R.t Set_once.t
@@ -255,8 +257,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
       ; log_error : string -> unit
       }
 
-    let equal a b = Uid.equal a.uid b.uid
-    let uid t = t.uid
+    let id t = t.id
 
     let status t =
       let state =
@@ -372,7 +373,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
 
     let create ?open_timeout ?on_state_update config key args ~with_ ~log_error =
       let t =
-        { uid = Uid.create ()
+        { id = Id.create ()
         ; key
         ; args
         ; resource = Set_once.create ()
@@ -439,23 +440,23 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
       -> (Resource.t -> [`Idle | `In_use_until of unit Ivar.t | `Closing] -> unit)
            Staged.t
   end = struct
-    module Lru = Hash_queue.Make (Uid)
+    module Lru = Hash_queue.Make (Resource.Id)
 
     type t = Resource.t Lru.t
 
     let create () = Lru.create ()
 
     let enqueue t resource =
-      let uid = Resource.uid resource in
-      match Lru.enqueue_back t uid resource with
+      let id = Resource.id resource in
+      match Lru.enqueue_back t id resource with
       | `Ok -> ()
       | `Key_already_present ->
         (* This shouldn't happen, but this is the logical thing to do. *)
-        ignore (Lru.lookup_and_move_to_back_exn t uid : Resource.t)
+        ignore (Lru.lookup_and_move_to_back_exn t id : Resource.t)
     ;;
 
     let remove t resource =
-      match Lru.remove t (Resource.uid resource) with
+      match Lru.remove t (Resource.id resource) with
       | `Ok -> ()
       | `No_such_key ->
         (* This can occur because [close_least_recently_used] removes from the queue and
@@ -621,7 +622,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
       ; key : R.Key.t
       ; args : R.Common_args.t
       ; global_resource_limiter : Global_resource_limiter.t
-      ; mutable resources : Resource.t list
+      ; resources : Resource.t Resource.Id.Table.t
       ; waiting_jobs : job Queue.t
       ; trigger_queue_manager : unit Mvar.Read_write.t
       ; mutable close_started : bool
@@ -629,7 +630,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
       ; log_error : string -> unit
       }
 
-    let num_open t = List.length t.resources
+    let num_open t = Hashtbl.length t.resources
 
     let status t =
       let max_time_on_queue =
@@ -638,26 +639,26 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
           Time_ns.diff (Time_ns.now ()) (Job.created_at job))
       in
       { Status.Resource_list.key = t.key
-      ; resources = List.map t.resources ~f:Resource.status
+      ; resources = Hashtbl.data t.resources |> List.map ~f:Resource.status
       ; queue_length = Queue.length t.waiting_jobs
       ; max_time_on_queue
       }
     ;;
 
     let find_available_resource t ~f =
-      let rec loop ~until = function
-        | [] -> `None_until (Deferred.any until)
-        | r :: rs ->
-          (match Resource.immediate r ~f with
-           | `Ok r -> `Immediate r
-           | `Resource_unavailable_until u -> loop ~until:(u :: until) rs
-           | `Resource_closed -> loop ~until rs)
-      in
-      loop t.resources ~until:[]
+      With_return.with_return (fun { return } ->
+        let until =
+          Hashtbl.fold t.resources ~init:[] ~f:(fun ~key:_ ~data:r until ->
+            match Resource.immediate r ~f with
+            | `Ok r -> return (`Immediate r)
+            | `Resource_unavailable_until u -> u :: until
+            | `Resource_closed -> until)
+        in
+        `None_until (Deferred.any until))
     ;;
 
     let create_resource ?open_timeout t ~f =
-      if List.length t.resources >= t.config.max_resources_per_id
+      if Hashtbl.length t.resources >= t.config.max_resources_per_id
       then None
       else (
         match
@@ -675,14 +676,13 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
           upon u (Mvar.set t.trigger_queue_manager);
           None
         | `Ok (resource, response) ->
-          t.resources <- resource :: t.resources;
+          Hashtbl.add_exn t.resources ~key:(Resource.id resource) ~data:resource;
           (Resource.close_finished resource
            >>> fun () ->
-           t.resources
-           <- List.filter t.resources ~f:(fun r -> not (Resource.equal resource r));
+           Hashtbl.remove t.resources (Resource.id resource);
            (* Trigger that capacity is now available *)
            Mvar.set t.trigger_queue_manager ();
-           if t.close_started && List.is_empty t.resources
+           if t.close_started && Hashtbl.is_empty t.resources
            then Ivar.fill t.close_finished ());
           (* Trigger when this resource is now available. This is needed because
              [create_resource] is called from outside this module *)
@@ -742,7 +742,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
         ; key
         ; args
         ; global_resource_limiter
-        ; resources = []
+        ; resources = Resource.Id.Table.create ()
         ; waiting_jobs = Queue.create ()
         ; trigger_queue_manager = Mvar.create ()
         ; close_started = false
@@ -765,18 +765,19 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
         Mvar.set t.trigger_queue_manager ())
     ;;
 
-    let is_empty t = List.is_empty t.resources && Queue.is_empty t.waiting_jobs
+    let is_empty t = Hashtbl.is_empty t.resources && Queue.is_empty t.waiting_jobs
     let close_finished t = Ivar.read t.close_finished
 
     let close_and_flush' t =
       if not t.close_started
       then (
         t.close_started <- true;
-        if List.is_empty t.resources
+        if Hashtbl.is_empty t.resources
         then Ivar.fill t.close_finished ()
         else (
           Mvar.set t.trigger_queue_manager ();
-          List.iter t.resources ~f:(fun r -> don't_wait_for (Resource.close_when_idle r))))
+          Hashtbl.iter t.resources ~f:(fun r ->
+            don't_wait_for (Resource.close_when_idle r))))
     ;;
   end
 
@@ -956,7 +957,7 @@ module Make_wrapped (R : Resource.S_wrapped) = struct
   let close_finished t = Ivar.read t.close_finished
 end
 
-module Make (R : Resource.S) = struct
+module Make (R : Resource.S) () = struct
   include Make_wrapped (struct
       include R
 
@@ -964,10 +965,12 @@ module Make (R : Resource.S) = struct
 
       let underlying t = t
     end)
+      ()
 end
 
-module Make_simple (R : Resource.Simple) = struct
+module Make_simple (R : Resource.Simple) () = struct
   include Make_wrapped (struct
       include Resource.Make_simple (R)
     end)
+      ()
 end
