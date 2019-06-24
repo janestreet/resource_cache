@@ -47,8 +47,10 @@ module type S = sig
     -> [ `Ok of 'a
        | `Gave_up_waiting_for_resource
        | `Error_opening_resource of Error.t
-       | `Cache_is_closed ]
+       | `Cache_is_closed
+       ]
          Deferred.t
+
 
   (** Like [with_] and [with_'] except [f] is run on the first matching available resource
       (or the first resource that has availability to be opened).
@@ -76,7 +78,8 @@ module type S = sig
     -> [ `Ok of key * 'a
        | `Error_opening_resource of key * Error.t
        | `Gave_up_waiting_for_resource
-       | `Cache_is_closed ]
+       | `Cache_is_closed
+       ]
          Deferred.t
 
   (** Tries [with_any'] in a loop (removing args that have open errors) until receiving an
@@ -91,7 +94,8 @@ module type S = sig
     -> [ `Ok of key * 'a
        | `Error_opening_all_resources of (key * Error.t) list
        | `Gave_up_waiting_for_resource
-       | `Cache_is_closed ]
+       | `Cache_is_closed
+       ]
          Deferred.t
 
   val close_started : t -> bool
@@ -103,10 +107,12 @@ module type S = sig
       returned [Deferred.t] is determined when all jobs have finished running and all
       resources have been closed. *)
   val close_and_flush : t -> unit Deferred.t
+
 end
 
 module type Resource_cache = sig
   module type S = S
+
 
   (** [Cache.Make] creates a cache module that exposes a simple [with_] interface over its
       resources. The cache has the following properties:

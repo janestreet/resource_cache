@@ -14,7 +14,8 @@ module type S = sig
     type state =
       [ `Busy
       | `Idle
-      | `Closing ]
+      | `Closing
+      ]
     [@@deriving sexp_of, compare]
 
     type t =

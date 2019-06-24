@@ -7,7 +7,7 @@ module Resource = struct
   module Common_args = Unit
 
   type t =
-    { mutable status : [`Open | `Closed]
+    { mutable status : [ `Open | `Closed ]
     ; close_finished : unit Ivar.t
     ; key : int
     ; id : int

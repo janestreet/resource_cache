@@ -4,7 +4,7 @@ module Stable = struct
   module Resource = struct
     module V1 = struct
       type t =
-        { state : [`Busy | `Closing | `Idle]
+        { state : [ `Busy | `Closing | `Idle ]
         ; since : Time_ns.Span.V2.t
         }
       [@@deriving sexp, bin_io]
@@ -51,7 +51,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       type state =
         [ `Busy
         | `Idle
-        | `Closing ]
+        | `Closing
+        ]
       [@@deriving sexp_of, compare]
 
       type t = Stable.Resource.V1.t =
@@ -91,7 +92,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
   module Delayed_failures = struct
     type t =
       [ `Error_opening_resource of R.Key.t * Error.t
-      | `Cache_is_closed ]
+      | `Cache_is_closed
+      ]
   end
 
   module Job : sig
@@ -111,7 +113,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
 
     val result
       :  'a t
-      -> [`Ok of R.Key.t * 'a | `Gave_up_waiting_for_resource | Delayed_failures.t]
+      -> [ `Ok of R.Key.t * 'a | `Gave_up_waiting_for_resource | Delayed_failures.t ]
            Deferred.t
 
     val f : 'a t -> R.t -> 'a Deferred.t
@@ -129,7 +131,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       -> result:[ `Ok of R.Key.t * 'a
                 | Delayed_failures.t
                 | (* This case is not possible, but the compiler gets mad otherwise *)
-                  `Gave_up_waiting_for_resource ]
+                  `Gave_up_waiting_for_resource
+                ]
                   Deferred.t
       -> unit
 
@@ -138,7 +141,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
     type 'a t =
       { f : R.t -> 'a Deferred.t
       ; result_ivar :
-          [`Ok of R.Key.t * 'a | `Gave_up_waiting_for_resource | Delayed_failures.t]
+          [ `Ok of R.Key.t * 'a | `Gave_up_waiting_for_resource | Delayed_failures.t ]
             Deferred.t
             Ivar.t
       ; open_timeout : Time_ns.Span.t option
@@ -182,7 +185,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       type t =
         [ `Idle
         | `In_use_until of unit Ivar.t
-        | `Closing ]
+        | `Closing
+        ]
     end
 
     type t
@@ -207,7 +211,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       -> R.Common_args.t
       -> with_:(R.t -> 'a Deferred.t)
       -> log_error:(string -> unit)
-      -> t * [> `Ok of R.Key.t * 'a | Delayed_failures.t] Deferred.t
+      -> t * [> `Ok of R.Key.t * 'a | Delayed_failures.t ] Deferred.t
 
     val status : t -> Status.Resource.t
 
@@ -232,7 +236,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       -> f:(R.t -> 'a Deferred.t)
       -> [ `Ok of 'a Deferred.t
          | `Resource_unavailable_until of unit Deferred.t
-         | `Resource_closed ]
+         | `Resource_closed
+         ]
   end = struct
     module Id = Unique_id.Int ()
 
@@ -240,7 +245,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       type t =
         [ `Idle
         | `In_use_until of unit Ivar.t
-        | `Closing ]
+        | `Closing
+        ]
     end
 
     type t =
@@ -293,8 +299,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
                t.log_error (sprintf !"Exception closing resource: %{Exn}" exn))
         in
         match%map Clock_ns.with_timeout (Time_ns.Span.of_sec 10.) closed with
-        | `Result ()
-        | `Timeout -> Ivar.fill t.close_finished ()
+        | `Result () | `Timeout -> Ivar.fill t.close_finished ()
       in
       match t.state with
       | `Closing -> close_finished t
@@ -437,7 +442,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
 
     val on_resource_state_update
       :  t
-      -> (Resource.t -> [`Idle | `In_use_until of unit Ivar.t | `Closing] -> unit)
+      -> (Resource.t -> [ `Idle | `In_use_until of unit Ivar.t | `Closing ] -> unit)
            Staged.t
   end = struct
     module Lru = Hash_queue.Make (Resource.Id)
@@ -475,7 +480,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
     ;;
 
     let on_resource_state_update t =
-      stage (fun resource -> function
+      stage (fun resource ->
+        function
         | `Idle -> enqueue t resource
         | `In_use_until _ | `Closing -> remove t resource)
     ;;
@@ -497,9 +503,10 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       -> R.Common_args.t
       -> with_:(R.t -> 'a Deferred.t)
       -> log_error:(string -> unit)
-      -> [ `Ok of Resource.t * [> `Ok of R.Key.t * 'a | Delayed_failures.t] Deferred.t
+      -> [ `Ok of Resource.t * [> `Ok of R.Key.t * 'a | Delayed_failures.t ] Deferred.t
          | `Cache_is_closed
-         | `No_resource_available_until of unit Deferred.t ]
+         | `No_resource_available_until of unit Deferred.t
+         ]
 
     val maybe_close_least_recently_used : t -> unit
     val close_and_flush : t -> unit Deferred.t
@@ -604,13 +611,13 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
     val find_available_resource
       :  t
       -> f:(R.t -> 'a Deferred.t)
-      -> [`Immediate of 'a Deferred.t | `None_until of unit Deferred.t]
+      -> [ `Immediate of 'a Deferred.t | `None_until of unit Deferred.t ]
 
     val create_resource
       :  ?open_timeout:Time_ns.Span.t
       -> t
       -> f:(R.t -> 'a Deferred.t)
-      -> [> `Ok of R.Key.t * 'a | Delayed_failures.t] Deferred.t option
+      -> [> `Ok of R.Key.t * 'a | Delayed_failures.t ] Deferred.t option
 
     val enqueue : t -> 'a Job.t -> unit
     val num_open : t -> int
@@ -958,19 +965,21 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
 end
 
 module Make (R : Resource.S) () = struct
-  include Make_wrapped (struct
-      include R
+  include Make_wrapped
+      (struct
+        include R
 
-      type resource = t
+        type resource = t
 
-      let underlying t = t
-    end)
+        let underlying t = t
+      end)
       ()
 end
 
 module Make_simple (R : Resource.Simple) () = struct
-  include Make_wrapped (struct
-      include Resource.Make_simple (R)
-    end)
+  include Make_wrapped
+      (struct
+        include Resource.Make_simple (R)
+      end)
       ()
 end
