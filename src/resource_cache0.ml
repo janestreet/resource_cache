@@ -358,7 +358,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
            set_idle t;
            res
          | Error exn ->
-           don't_wait_for (Deferred.ignore (close t));
+           don't_wait_for (Deferred.ignore_m (close t));
            raise exn)
     ;;
 
