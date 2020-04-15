@@ -32,6 +32,11 @@ module type S = sig
 
   val open_ : Key.t -> Common_args.t -> t Deferred.Or_error.t
   val close : t -> unit Deferred.t
+
+  (** When [close_finished] is determined, the resource will not be reused by a new job.
+      If no job is currently using this resource, the resource will be dropped from the
+      cache immediately. If there is a currently running job with this resource, the
+      resource will be dropped from the cache once that job finishes. *)
   val close_finished : t -> unit Deferred.t
 
   (** [has_close_started t] should return [true] iff [close t] has been called, even if
