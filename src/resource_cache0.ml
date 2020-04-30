@@ -151,6 +151,10 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
 
     let create ?open_timeout ~give_up ~f =
       let result_ivar = Ivar.create () in
+      (* This [Job.t] is placed into a queue and then executed later. The execution of [f]
+         occurs inside a different async execution context. We need to preserve the async
+         context from the original call. *)
+      let f = Monitor.Exported_for_scheduler.preserve_execution_context' f |> unstage in
       upon give_up (fun () ->
         Ivar.fill_if_empty result_ivar (return `Gave_up_waiting_for_resource));
       { f; result_ivar; open_timeout; created_at = Time_ns.now () }

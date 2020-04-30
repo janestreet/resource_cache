@@ -292,6 +292,54 @@ let%expect_test "[f] raises" =
   return ()
 ;;
 
+let%expect_test "[f] raises to correct monitor" =
+  let t =
+    Test_cache.init
+      ~config:
+        { max_resources = 1
+        ; max_resources_per_id = 1
+        ; max_resource_reuse = 10
+        ; idle_cleanup_after = Time_ns.Span.day
+        ; close_idle_resources_when_at_limit = false
+        }
+      ()
+  in
+  let%bind r0 =
+    match%map
+      Monitor.try_with
+        ~rest:(`Call (fun exn -> print_s [%message "unexpected exception" (exn : exn)]))
+        (fun () ->
+           let r0 = Open_resource.create ~now:true t [ 0 ] in
+           let%map (_ : Resource.t) = r0.resource in
+           r0)
+    with
+    | Ok r0 -> r0
+    | Error exn -> raise exn
+  in
+  let%bind () = [%expect {|
+    Opening 0,0
+    Got resource 0,0 |}] in
+  let deferred_result =
+    Monitor.try_with ~name:"usage" (fun () ->
+      get_resource ~f:(fun _ -> failwith "from within usage monitor") t [ 0 ])
+  in
+  let%bind () = r0.release () in
+  let%bind () = [%expect {|
+    Releasing resource 0,0
+    Got resource 0,0 |}] in
+  let%bind () =
+    match%map deferred_result with
+    | Ok _ -> failwith "an exception was expected"
+    | Error e -> show_raise ~hide_positions:true (fun () -> raise e)
+  in
+  [%expect
+    {|
+    (raised (
+      monitor.ml.Error
+      (Failure "from within usage monitor")
+      ("<backtrace elided in test>" "Caught by monitor usage"))) |}]
+;;
+
 let%expect_test "close_and_flush with nothing open" =
   let t = Test_cache.init ~config () in
   let%bind () = close_and_flush t in
