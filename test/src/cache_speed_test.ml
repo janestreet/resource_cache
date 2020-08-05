@@ -9,6 +9,7 @@ let main ~iterations ~duration ~cache_slots ~close_idle_resources_when_at_limit 
     ; max_resources_per_id = cache_slots
     ; max_resource_reuse = iterations
     ; close_idle_resources_when_at_limit
+    ; close_resource_on_unhandled_exn = false
     }
   in
   let t = Test_cache.init ~config () in

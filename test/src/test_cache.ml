@@ -11,16 +11,22 @@ module Resource = struct
     ; close_finished : unit Ivar.t
     ; key : int
     ; id : int
+    ; raise_now : unit Ivar.t
     }
   [@@deriving fields]
 
   let counter = ref 0
 
   let open_ key () =
+    let raise_now = Ivar.create () in
+    don't_wait_for
+      (let%map () = Ivar.read raise_now in
+       raise_s [%message "Raising as requested"]);
     let id = !counter in
     counter := !counter + 1;
     printf "Opening %d,%d\n" key id;
-    Deferred.Or_error.return { status = `Open; close_finished = Ivar.create (); key; id }
+    Deferred.Or_error.return
+      { status = `Open; close_finished = Ivar.create (); key; id; raise_now }
   ;;
 
   let has_close_started t =
@@ -153,6 +159,7 @@ let config =
   ; max_resources_per_id = 1
   ; max_resource_reuse = 2
   ; close_idle_resources_when_at_limit = false
+  ; close_resource_on_unhandled_exn = true
   }
 ;;
 
@@ -301,6 +308,7 @@ let%expect_test "[f] raises to correct monitor" =
         ; max_resource_reuse = 10
         ; idle_cleanup_after = Time_ns.Span.day
         ; close_idle_resources_when_at_limit = false
+        ; close_resource_on_unhandled_exn = false
         }
       ()
   in
@@ -421,6 +429,7 @@ let test_load_balance ~load_balance =
         ; max_resource_reuse = 1
         ; idle_cleanup_after = Time_ns.Span.day
         ; close_idle_resources_when_at_limit = false
+        ; close_resource_on_unhandled_exn = false
         }
       ()
   in
@@ -537,6 +546,7 @@ let%expect_test "close idle resources when at limit" =
     ; max_resources_per_id = 2
     ; max_resource_reuse = 2
     ; close_idle_resources_when_at_limit = true
+    ; close_resource_on_unhandled_exn = false
     }
   in
   let t = Test_cache.init ~config () in
@@ -578,4 +588,47 @@ let%expect_test "close idle resources when at limit" =
     Opening 1,3
     Got resource 1,3 |}] in
   return ()
+;;
+
+let%expect_test "raise after open" =
+  Log.Global.set_output
+    [ Log.For_testing.create_output ~map_output:(fun x ->
+        Sexp.to_string_hum (Sexp.of_string x))
+    ];
+  let test ~close_resource_on_unhandled_exn =
+    let config =
+      { Resource_cache.Config.max_resources = 2
+      ; idle_cleanup_after = Time_ns.Span.day
+      ; max_resources_per_id = 2
+      ; max_resource_reuse = 2
+      ; close_idle_resources_when_at_limit = true
+      ; close_resource_on_unhandled_exn
+      }
+    in
+    let t = Test_cache.init ~config () in
+    Test_cache.with_ t 0 ~f:(fun r ->
+      Ivar.fill r.raise_now ();
+      Log.flushed (force Log.Global.log))
+    |> Deferred.Or_error.ok_exn
+  in
+  let%bind () = test ~close_resource_on_unhandled_exn:false in
+  let%bind () =
+    [%expect
+      {|
+        Opening 0,0
+        ("Exception raised to [Monitor.try_with] that already returned."
+         "This error was captured by a default handler in [Async.Log]."
+         (exn
+          (monitor.ml.Error "Raising as requested" ("<backtrace elided in test>")))) |}]
+  in
+  let%bind () = test ~close_resource_on_unhandled_exn:true in
+  [%expect
+    {|
+        Opening 0,0
+        Closing 0,0
+        ("Exception raised to [Monitor.try_with] that already returned."
+         "This error was captured by a default handler in [Async.Log]."
+         (exn
+          ("Resource raised exn after creation" (key 0)
+           (monitor.ml.Error "Raising as requested" ("<backtrace elided in test>"))))) |}]
 ;;

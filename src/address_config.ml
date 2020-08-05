@@ -1,6 +1,23 @@
 module Stable = struct
   open! Core_kernel.Core_kernel_stable
 
+  module V3 = struct
+    type t =
+      { max_open_connections : int
+      ; cleanup_idle_connection_after : Time_ns.Span.V2.t
+      ; max_connections_per_address : int
+      ; max_connection_reuse : int
+      ; close_idle_connections_when_at_limit : bool
+      ; close_connection_on_unhandled_exn : bool
+      }
+    [@@deriving bin_io, sexp]
+
+    let%expect_test _ =
+      print_endline [%bin_digest: t];
+      [%expect {| 03db3ce55a1aa6bbda6faa70d3b3e86b |}]
+    ;;
+  end
+
   module V2 = struct
     type t =
       { max_open_connections : int
@@ -9,7 +26,11 @@ module Stable = struct
       ; max_connection_reuse : int
       ; close_idle_connections_when_at_limit : bool
       }
-    [@@deriving bin_io, sexp]
+    [@@deriving
+      bin_io, sexp, stable_record ~version:V3.t ~add:[ close_connection_on_unhandled_exn ]]
+
+    let of_v3 = of_V3_t
+    let to_v3 = to_V3_t ~close_connection_on_unhandled_exn:false
 
     let%expect_test _ =
       print_endline [%bin_digest: t];
@@ -43,12 +64,13 @@ open! Core_kernel
 open! Async_kernel
 open! Import
 
-type t = Stable.V2.t =
+type t = Stable.V3.t =
   { max_open_connections : int
   ; cleanup_idle_connection_after : Time_ns.Span.t
   ; max_connections_per_address : int
   ; max_connection_reuse : int
   ; close_idle_connections_when_at_limit : bool
+  ; close_connection_on_unhandled_exn : bool
   }
 [@@deriving compare, fields, sexp_of]
 
@@ -60,6 +82,7 @@ let default =
   ; max_connections_per_address = 10
   ; max_connection_reuse = 10
   ; close_idle_connections_when_at_limit = false
+  ; close_connection_on_unhandled_exn = true
   }
 ;;
 
@@ -70,6 +93,7 @@ let to_cache_config t =
     ~max_resources_per_id:t.max_connections_per_address
     ~max_resource_reuse:t.max_connection_reuse
     ~close_idle_resources_when_at_limit:t.close_idle_connections_when_at_limit
+    ~close_resource_on_unhandled_exn:t.close_connection_on_unhandled_exn
 ;;
 
 let of_cache_config (cache_config : Config.t) =
@@ -79,4 +103,5 @@ let of_cache_config (cache_config : Config.t) =
     ~max_connections_per_address:cache_config.max_resources_per_id
     ~max_connection_reuse:cache_config.max_resource_reuse
     ~close_idle_connections_when_at_limit:cache_config.close_idle_resources_when_at_limit
+    ~close_connection_on_unhandled_exn:cache_config.close_resource_on_unhandled_exn
 ;;

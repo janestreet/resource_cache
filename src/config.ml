@@ -1,6 +1,23 @@
 module Stable = struct
   open! Core_kernel.Core_kernel_stable
 
+  module V3 = struct
+    type t =
+      { max_resources : int
+      ; idle_cleanup_after : Time_ns.Span.V2.t
+      ; max_resources_per_id : int
+      ; max_resource_reuse : int
+      ; close_idle_resources_when_at_limit : bool
+      ; close_resource_on_unhandled_exn : bool
+      }
+    [@@deriving bin_io, sexp]
+
+    let%expect_test _ =
+      print_endline [%bin_digest: t];
+      [%expect {| a7c16e04c107601084506b88a9f6a31b |}]
+    ;;
+  end
+
   module V2 = struct
     type t =
       { max_resources : int
@@ -9,7 +26,10 @@ module Stable = struct
       ; max_resource_reuse : int
       ; close_idle_resources_when_at_limit : bool
       }
-    [@@deriving bin_io, sexp]
+    [@@deriving
+      bin_io, sexp, stable_record ~version:V3.t ~add:[ close_resource_on_unhandled_exn ]]
+
+    let to_v3 = to_V3_t ~close_resource_on_unhandled_exn:false
 
     let%expect_test _ =
       print_endline [%bin_digest: t];
@@ -42,12 +62,13 @@ open! Core_kernel
 open! Async_kernel
 open! Import
 
-type t = Stable.V2.t =
+type t = Stable.V3.t =
   { max_resources : int
   ; idle_cleanup_after : Time_ns.Span.t
   ; max_resources_per_id : int
   ; max_resource_reuse : int
   ; close_idle_resources_when_at_limit : bool
+  ; close_resource_on_unhandled_exn : bool
   }
 [@@deriving compare, fields, sexp_of]
 

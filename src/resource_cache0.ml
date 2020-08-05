@@ -395,9 +395,40 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
         ; log_error
         }
       in
+      let maybe_catch_unhandled_exns_and_close ~f =
+        (let resource = ref None in
+         let close_on_exn exn =
+           !Monitor.Expert.try_with_log_exn
+             (Error.create_s
+                [%message
+                  "Resource raised exn after creation" (key : R.Key.t) ~_:(exn : Exn.t)]
+              |> Error.to_exn);
+           Option.iter !resource ~f:(fun resource ->
+             don't_wait_for
+               (Deferred.ignore_m
+                  (Monitor.try_with ~rest:`Log (fun () -> R.close resource))))
+         in
+         let name =
+           if am_running_test
+           then None
+           else Some (Source_code_position.to_string [%here])
+         in
+         Monitor.try_with
+           ?name
+           ~rest:
+             (if config.close_resource_on_unhandled_exn
+              then `Call close_on_exn
+              else `Log)
+           (fun () ->
+              let%map.Deferred.Or_error res = f () in
+              resource := Some res;
+              res))
+        >>| Result.map_error ~f:Error.of_exn
+        |> Deferred.map ~f:Or_error.join
+      in
       let res =
         match%bind
-          Deferred.Or_error.try_with_join (fun () ->
+          maybe_catch_unhandled_exns_and_close ~f:(fun () ->
             match open_timeout with
             | None -> R.open_ key args
             | Some timeout ->
