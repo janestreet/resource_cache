@@ -86,9 +86,7 @@ let assert_no_resource_available ?give_up t args =
   | Error e -> printf !"Error getting %{sexp: int list}: %{sexp:Error.t}\n" args e
 ;;
 
-let assert_no_resource_available_now =
-  assert_no_resource_available ~give_up:Deferred.unit
-;;
+let assert_no_resource_available_now = assert_no_resource_available ~give_up:Deferred.unit
 
 module Open_resource : sig
   type t =
@@ -229,10 +227,8 @@ let%expect_test "respect [max_resources]" =
   in
   (* We can't open a resource with a different key because [max_resources] is 2. *)
   let%bind () = assert_no_resource_available_now t [ 2 ] in
-  let%bind () =
-    [%expect {|
-      Error getting (2): "Gave up waiting for resource" |}]
-  in
+  let%bind () = [%expect {|
+      Error getting (2): "Gave up waiting for resource" |}] in
   (* Open a resource with a different key, without giving up. *)
   let r2 = Open_resource.create t [ 2 ] in
   (* Once we explicitly close a previous resource, we have capacity. *)

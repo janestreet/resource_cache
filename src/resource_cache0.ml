@@ -128,12 +128,13 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
 
     val mark_result_from_resource_creation
       :  'a t
-      -> result:[ `Ok of R.Key.t * 'a
-                | Delayed_failures.t
-                | (* This case is not possible, but the compiler gets mad otherwise *)
-                  `Gave_up_waiting_for_resource
-                ]
-                  Deferred.t
+      -> result:
+           [ `Ok of R.Key.t * 'a
+           | Delayed_failures.t
+           | (* This case is not possible, but the compiler gets mad otherwise *)
+             `Gave_up_waiting_for_resource
+           ]
+             Deferred.t
       -> unit
 
     val mark_cache_closed : 'a t -> unit
@@ -299,8 +300,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
                  if R.has_close_started r then Deferred.unit else R.close r)
              with
              | Ok () -> ()
-             | Error exn ->
-               t.log_error (sprintf !"Exception closing resource: %{Exn}" exn))
+             | Error exn -> t.log_error (sprintf !"Exception closing resource: %{Exn}" exn))
         in
         match%map Clock_ns.with_timeout (Time_ns.Span.of_sec 10.) closed with
         | `Result () | `Timeout -> Ivar.fill t.close_finished ()
@@ -409,16 +409,12 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
                   (Monitor.try_with ~rest:`Log (fun () -> R.close resource))))
          in
          let name =
-           if am_running_test
-           then None
-           else Some (Source_code_position.to_string [%here])
+           if am_running_test then None else Some (Source_code_position.to_string [%here])
          in
          Monitor.try_with
            ?name
            ~rest:
-             (if config.close_resource_on_unhandled_exn
-              then `Call close_on_exn
-              else `Log)
+             (if config.close_resource_on_unhandled_exn then `Call close_on_exn else `Log)
            (fun () ->
               let%map.Deferred.Or_error res = f () in
               resource := Some res;
@@ -515,8 +511,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
     ;;
 
     let on_resource_state_update t =
-      stage (fun resource ->
-        function
+      stage (fun resource -> function
         | `Idle -> enqueue t resource
         | `In_use_until _ | `Closing -> remove t resource)
     ;;
@@ -589,8 +584,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
             ~with_
             ~log_error
         in
-        don't_wait_for
-          (Throttle.enqueue t.throttle (fun () -> Resource.close_finished r));
+        don't_wait_for (Throttle.enqueue t.throttle (fun () -> Resource.close_finished r));
         `Ok (r, v))
       else
         `No_resource_available_until
@@ -966,16 +960,13 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       ; log_error
       }
     in
-    Clock_ns.every
-      ~stop:(Ivar.read t.close_finished)
-      config.idle_cleanup_after
-      (fun () ->
-         Hashtbl.filter_inplace t.cache ~f:(fun d ->
-           if Resource_list.is_empty d
-           then (
-             Resource_list.close_and_flush' d;
-             false)
-           else true));
+    Clock_ns.every ~stop:(Ivar.read t.close_finished) config.idle_cleanup_after (fun () ->
+      Hashtbl.filter_inplace t.cache ~f:(fun d ->
+        if Resource_list.is_empty d
+        then (
+          Resource_list.close_and_flush' d;
+          false)
+        else true));
     t
   ;;
 
