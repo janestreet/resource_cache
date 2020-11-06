@@ -270,8 +270,11 @@ let%expect_test "[f] raises" =
      closed. *)
   let%bind () =
     match%map
-      Deferred.Or_error.try_with_join (fun () ->
-        get_resource ~f:(fun _ -> failwith "failure") t [ 0 ])
+      Deferred.Or_error.try_with_join
+        ~run:
+          `Schedule
+        ~rest:`Log
+        (fun () -> get_resource ~f:(fun _ -> failwith "failure") t [ 0 ])
     with
     | Ok (_r, _res) -> failwith "exn should have been caught"
     | Error e -> show_raise ~hide_positions:true (fun () -> Error.raise e)
@@ -301,6 +304,8 @@ let%expect_test "[f] raises to correct monitor" =
   let%bind r0 =
     match%map
       Monitor.try_with
+        ~run:
+          `Schedule
         ~rest:(`Call (fun exn -> print_s [%message "unexpected exception" (exn : exn)]))
         (fun () ->
            let r0 = Open_resource.create ~now:true t [ 0 ] in
@@ -314,8 +319,12 @@ let%expect_test "[f] raises to correct monitor" =
     Opening 0,0
     Got resource 0,0 |}];
   let deferred_result =
-    Monitor.try_with ~name:"usage" (fun () ->
-      get_resource ~f:(fun _ -> failwith "from within usage monitor") t [ 0 ])
+    Monitor.try_with
+      ~run:
+        `Schedule
+      ~rest:`Log
+      ~name:"usage"
+      (fun () -> get_resource ~f:(fun _ -> failwith "from within usage monitor") t [ 0 ])
   in
   let%bind () = r0.release () in
   [%expect {|

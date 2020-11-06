@@ -21,6 +21,7 @@ module Make_simple (R : Simple) = struct
     let open Deferred.Or_error.Let_syntax in
     let%map underlying =
       Monitor.try_with_join_or_error
+        ~rest:`Log
         ~name:(sprintf !"opening resource [%{sexp:Key.t}]" key)
         (fun () -> R.open_ key common_args)
     in

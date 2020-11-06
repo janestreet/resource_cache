@@ -296,8 +296,11 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
           | None -> Deferred.unit
           | Some r ->
             (match%map
-               Monitor.try_with (fun () ->
-                 if R.has_close_started r then Deferred.unit else R.close r)
+               Monitor.try_with
+                 ~run:
+                   `Schedule
+                 ~rest:`Log
+                 (fun () -> if R.has_close_started r then Deferred.unit else R.close r)
              with
              | Ok () -> ()
              | Error exn -> t.log_error (sprintf !"Exception closing resource: %{Exn}" exn))
@@ -356,7 +359,11 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
         (* deliberately not filling [done_] here.
            It is filled in [set_idle] or [close]. *)
         (match%map
-           Monitor.try_with (fun () -> f (Set_once.get_exn t.resource [%here]))
+           Monitor.try_with
+             ~run:
+               `Schedule
+             ~rest:`Log
+             (fun () -> f (Set_once.get_exn t.resource [%here]))
          with
          | Ok res ->
            set_idle t;
@@ -406,12 +413,18 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
            Option.iter !resource ~f:(fun resource ->
              don't_wait_for
                (Deferred.ignore_m
-                  (Monitor.try_with ~rest:`Log (fun () -> R.close resource))))
+                  (Monitor.try_with
+                     ~run:
+                       `Schedule
+                     ~rest:`Log
+                     (fun () -> R.close resource))))
          in
          let name =
            if am_running_test then None else Some (Source_code_position.to_string [%here])
          in
          Monitor.try_with
+           ~run:
+             `Schedule
            ?name
            ~rest:
              (if config.close_resource_on_unhandled_exn then `Call close_on_exn else `Log)
