@@ -990,7 +990,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       let%map () =
         Deferred.all_unit
           (Global_resource_limiter.close_and_flush t.global_resource_limiter
-           :: List.map (Hashtbl.data t.cache) ~f:(fun r ->
+           ::
+           List.map (Hashtbl.data t.cache) ~f:(fun r ->
              Resource_list.close_and_flush' r;
              Resource_list.close_finished r))
       in
@@ -1004,7 +1005,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
 end
 
 module Make (R : Resource.S) () = struct
-  include Make_wrapped
+  include
+    Make_wrapped
       (struct
         include R
 
@@ -1016,7 +1018,8 @@ module Make (R : Resource.S) () = struct
 end
 
 module Make_simple (R : Resource.Simple) () = struct
-  include Make_wrapped
+  include
+    Make_wrapped
       (struct
         include Resource.Make_simple (R)
       end)
