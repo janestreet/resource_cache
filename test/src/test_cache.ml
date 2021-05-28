@@ -2,6 +2,8 @@ open! Core
 open! Async
 open Expect_test_helpers_core
 
+let () = Backtrace.elide := true
+
 module Resource = struct
   module Key = Int
   module Common_args = Unit
