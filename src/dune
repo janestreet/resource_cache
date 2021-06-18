@@ -1,4 +1,4 @@
 (library (name resource_cache) (public_name resource_cache)
  (preprocess (pps ppx_jane))
- (libraries async_kernel async_rpc_kernel core_kernel
+ (libraries async_kernel async_rpc_kernel core_kernel.core
   async_kernel.eager_deferred))

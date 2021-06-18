@@ -1,5 +1,5 @@
 module Stable = struct
-  open! Core_kernel.Core_kernel_stable
+  open! Core.Core_stable
 
   module Resource = struct
     module V1 = struct
@@ -38,7 +38,7 @@ module Stable = struct
   end
 end
 
-open! Core_kernel
+open! Core
 open! Async_kernel
 open! Import
 include Resource_cache_intf

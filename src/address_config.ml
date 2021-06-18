@@ -1,5 +1,5 @@
 module Stable = struct
-  open! Core_kernel.Core_kernel_stable
+  open! Core.Core_stable
 
   module V3 = struct
     type t =
@@ -60,7 +60,7 @@ module Stable = struct
   end
 end
 
-open! Core_kernel
+open! Core
 open! Async_kernel
 open! Import
 
