@@ -150,7 +150,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       }
     [@@deriving fields]
 
-    let create ?open_timeout ~give_up ~f =
+    let[@warning "-16"] create ?open_timeout ~give_up ~f =
       let result_ivar = Ivar.create () in
       (* This [Job.t] is placed into a queue and then executed later. The execution of [f]
          occurs inside a different async execution context. We need to preserve the async
