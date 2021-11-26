@@ -1,3 +1,3 @@
 (executables (names cache_speed_test)
- (libraries core.command_unix core_kernel.core test_resource_cache)
+ (libraries core_unix.command_unix core test_resource_cache)
  (preprocess (pps ppx_jane)))
