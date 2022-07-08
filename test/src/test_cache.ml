@@ -273,8 +273,7 @@ let%expect_test "[f] raises" =
   let%bind () =
     match%map
       Deferred.Or_error.try_with_join
-        ~run:
-          `Schedule
+        ~run:`Schedule
         ~rest:`Log
         (fun () -> get_resource ~f:(fun _ -> failwith "failure") t [ 0 ])
     with
@@ -290,7 +289,8 @@ let%expect_test "[f] raises" =
   return ()
 ;;
 
-let%expect_test "[f] raises to correct monitor" =
+let%expect_test "[f] when it is enqueued raises to correct monitor and cleans up properly"
+  =
   let t =
     Test_cache.init
       ~config:
@@ -303,11 +303,11 @@ let%expect_test "[f] raises to correct monitor" =
         }
       ()
   in
+  (* Open up a resource so we are triggering the case where we need to enqueue a [Job.t]
+  *)
   let%bind r0 =
     match%map
       Monitor.try_with
-        ~run:
-          `Schedule
         ~rest:(`Call (fun exn -> print_s [%message "unexpected exception" (exn : exn)]))
         (fun () ->
            let r0 = Open_resource.create ~now:true t [ 0 ] in
@@ -321,13 +321,11 @@ let%expect_test "[f] raises to correct monitor" =
     Opening 0,0
     Got resource 0,0 |}];
   let deferred_result =
-    Monitor.try_with
-      ~run:
-        `Schedule
-      ~rest:`Log
-      ~name:"usage"
-      (fun () -> get_resource ~f:(fun _ -> failwith "from within usage monitor") t [ 0 ])
+    Monitor.try_with ~name:"usage" (fun () ->
+      get_resource ~f:(fun _ -> failwith "from within usage monitor") t [ 0 ])
   in
+  (* Release the used resource so the above [get_resource] call grabs the available
+     resource *)
   let%bind () = r0.release () in
   [%expect {|
     Releasing resource 0,0
@@ -337,12 +335,26 @@ let%expect_test "[f] raises to correct monitor" =
     | Ok _ -> failwith "an exception was expected"
     | Error e -> show_raise ~hide_positions:true (fun () -> raise e)
   in
+  (* We expect the exception to be raised to the [Monitor.try_with] monitor, which causes
+     [deferred_result] to be determined with an error. If it raised to the wrong monitor,
+     then [deferred_result] would never be determined. *)
   [%expect
     {|
+    Closing 0,0
     (raised (
       monitor.ml.Error
       (Failure "from within usage monitor")
-      ("<backtrace elided in test>" "Caught by monitor usage"))) |}];
+      ("<backtrace elided in test>"))) |}];
+  (* Because of the exception, the resource should be closed. There is now capacity for a
+     new resource to be opened. *)
+  let%bind () =
+    match%map get_resource ~f:(fun _ -> return ()) t [ 0 ] with
+    | Error error -> Error.raise error
+    | Ok (_, ()) -> ()
+  in
+  [%expect {|
+    Opening 0,1
+    Got resource 0,1 |}];
   return ()
 ;;
 

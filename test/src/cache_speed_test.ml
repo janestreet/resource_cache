@@ -1,6 +1,6 @@
 open! Core
 open! Async
-module Time = Time_unix
+module Time = Time_float_unix
 module Test_cache = Test_cache.Test_cache
 
 let main ~iterations ~duration ~cache_slots ~close_idle_resources_when_at_limit =
