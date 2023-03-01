@@ -69,4 +69,5 @@ let command =
           main ~iterations ~duration ~cache_slots ~close_idle_resources_when_at_limit
         in
         printf "Runtime: %f sec\n" (Time.Span.to_sec time)]
+    ~behave_nicely_in_pipeline:false
 ;;
