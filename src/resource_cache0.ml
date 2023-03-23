@@ -304,7 +304,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
                  (fun () -> if R.has_close_started r then Deferred.unit else R.close r)
              with
              | Ok () -> ()
-             | Error exn -> t.log_error (sprintf !"Exception closing resource: %{Exn}" exn))
+             | Error exn ->
+               t.log_error (sprintf !"Exception closing resource: %{Exn}" exn))
         in
         match%map Clock_ns.with_timeout (Time_ns.Span.of_sec 10.) closed with
         | `Result () | `Timeout -> Ivar.fill t.close_finished ()
@@ -807,8 +808,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       (* Trigger that a new job is on the queue *)
       Mvar.set t.trigger_queue_manager ();
       upon (Job.result job) (fun _ ->
-        Queue.filter_inplace t.waiting_jobs ~f:(fun (T job') ->
-          not (phys_same job job'));
+        Queue.filter_inplace t.waiting_jobs ~f:(fun (T job') -> not (phys_same job job'));
         (* Trigger that a resource is now available *)
         Mvar.set t.trigger_queue_manager ())
     ;;
