@@ -43,7 +43,7 @@ module Resource = struct
     else (
       printf "Closing %d,%d\n" t.key t.id;
       t.status <- `Closed;
-      Ivar.fill t.close_finished ();
+      Ivar.fill_exn t.close_finished ();
       Deferred.unit)
   ;;
 
@@ -63,7 +63,7 @@ let get_resource ?(give_up = Deferred.never ()) ?load_balance ?r_ivar ~f t args 
   let%map result =
     Test_cache.with_any ~give_up ?load_balance t args ~f:(fun r ->
       printf "Got resource %d,%d\n" (Resource.key r) (Resource.id r);
-      Option.iter r_ivar ~f:(fun r_ivar -> Ivar.fill r_ivar r);
+      Option.iter r_ivar ~f:(fun r_ivar -> Ivar.fill_exn r_ivar r);
       f r)
   in
   result
@@ -135,7 +135,7 @@ end = struct
     in
     let resource = Ivar.read resource_ivar in
     let release () =
-      Ivar.fill release_ivar ();
+      Ivar.fill_exn release_ivar ();
       released
     in
     { resource; release }
@@ -613,7 +613,7 @@ let%expect_test "raise after open" =
     in
     let t = Test_cache.init ~config () in
     Test_cache.with_ t 0 ~f:(fun r ->
-      Ivar.fill r.raise_now ();
+      Ivar.fill_exn r.raise_now ();
       Log.flushed (force Log.Global.log))
     |> Deferred.Or_error.ok_exn
   in

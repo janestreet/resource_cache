@@ -19,7 +19,7 @@ let main ~iterations ~duration ~cache_slots ~close_idle_resources_when_at_limit 
   let f _ =
     let%map () = Clock_ns.after duration in
     incr completed;
-    if !completed = iterations then Ivar.fill done_ (Time.now ())
+    if !completed = iterations then Ivar.fill_exn done_ (Time.now ())
   in
   let start = Time.now () in
   for _ = 0 to iterations - 1 do

@@ -164,13 +164,13 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
     ;;
 
     let mark_result_from_available_resource t args ~result =
-      Ivar.fill
+      Ivar.fill_exn
         t.result_ivar
         (let%map res = result in
          `Result (args, res))
     ;;
 
-    let mark_result_from_resource_creation t ~result = Ivar.fill t.result_ivar result
+    let mark_result_from_resource_creation t ~result = Ivar.fill_exn t.result_ivar result
     let mark_cache_closed t = Ivar.fill_if_empty t.result_ivar (return `Cache_is_closed)
     let has_result t = Ivar.is_full t.result_ivar
 
@@ -308,14 +308,14 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
                t.log_error (sprintf !"Exception closing resource: %{Exn}" exn))
         in
         match%map Clock_ns.with_timeout (Time_ns.Span.of_sec 10.) closed with
-        | `Result () | `Timeout -> Ivar.fill t.close_finished ()
+        | `Result () | `Timeout -> Ivar.fill_exn t.close_finished ()
       in
       match t.state with
       | `Closing -> close_finished t
       | `Idle -> really_close ()
       | `In_use_until done_ ->
         assert (not (Ivar.is_full done_));
-        close_finished t >>> Ivar.fill done_;
+        close_finished t >>> Ivar.fill_exn done_;
         really_close ()
     ;;
 
@@ -339,7 +339,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
         then don't_wait_for (close t)
         else (
           set_state t `Idle;
-          Ivar.fill done_ ();
+          Ivar.fill_exn done_ ();
           Clock_ns.after t.config.idle_cleanup_after
           >>> fun () ->
           match t.state with
@@ -443,7 +443,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
                  Clock_ns.with_timeout
                    timeout
                    (let%map r = R.open_ key args in
-                    Ivar.fill resource_ivar r;
+                    Ivar.fill_exn resource_ivar r;
                     r)
                with
                | `Result r -> r
@@ -672,7 +672,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       ; args : R.Common_args.t
       ; global_resource_limiter : Global_resource_limiter.t
       ; resources : Resource.t Resource.Id.Table.t
-      ; waiting_jobs : job Queue.t
+      ; waiting_jobs : job Doubly_linked.t
       ; trigger_queue_manager : unit Mvar.Read_write.t
       ; mutable close_started : bool
       ; close_finished : unit Ivar.t
@@ -683,13 +683,13 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
 
     let status t =
       let max_time_on_queue =
-        Queue.peek t.waiting_jobs
+        Doubly_linked.first t.waiting_jobs
         |> Option.map ~f:(fun (T job) ->
           Time_ns.diff (Time_ns.now ()) (Job.created_at job))
       in
       { Status.Resource_list.key = t.key
       ; resources = Hashtbl.data t.resources |> List.map ~f:Resource.status
-      ; queue_length = Queue.length t.waiting_jobs
+      ; queue_length = Doubly_linked.length t.waiting_jobs
       ; max_time_on_queue
       }
     ;;
@@ -732,7 +732,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
            (* Trigger that capacity is now available *)
            Mvar.set t.trigger_queue_manager ();
            if t.close_started && Hashtbl.is_empty t.resources
-           then Ivar.fill t.close_finished ());
+           then Ivar.fill_exn t.close_finished ());
           (* Trigger when this resource is now available. This is needed because
              [create_resource] is called from outside this module *)
           upon response (fun _ -> Mvar.set t.trigger_queue_manager ());
@@ -741,19 +741,19 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
 
     let allocate_resources t =
       let rec loop () =
-        match Queue.peek t.waiting_jobs with
+        match Doubly_linked.first t.waiting_jobs with
         | None -> ()
         | Some (T job) ->
           (* Skip if this job has a result already *)
           if Job.has_result job
           then (
-            let (_ : _) = Queue.dequeue_exn t.waiting_jobs in
+            let (_ : job option) = Doubly_linked.remove_first t.waiting_jobs in
             loop ())
           else (
             match find_available_resource t ~f:(Job.f job) with
             | `Immediate result ->
               Job.mark_result_from_available_resource job t.key ~result;
-              let (_ : _) = Queue.dequeue_exn t.waiting_jobs in
+              let (_ : job option) = Doubly_linked.remove_first t.waiting_jobs in
               loop ()
             | `None_until until ->
               (* Trigger when a resource is available *)
@@ -763,7 +763,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
                with
                | Some result ->
                  Job.mark_result_from_resource_creation job ~result;
-                 let (_ : _) = Queue.dequeue_exn t.waiting_jobs in
+                 let (_ : job option) = Doubly_linked.remove_first t.waiting_jobs in
                  loop ()
                | None -> ()))
       in
@@ -775,8 +775,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
         let%bind () = Mvar.take t.trigger_queue_manager in
         if t.close_started
         then (
-          Queue.iter t.waiting_jobs ~f:(fun (T job) -> Job.mark_cache_closed job);
-          Queue.clear t.waiting_jobs;
+          Doubly_linked.iter t.waiting_jobs ~f:(fun (T job) -> Job.mark_cache_closed job);
+          Doubly_linked.clear t.waiting_jobs;
           Deferred.unit)
         else (
           allocate_resources t;
@@ -792,7 +792,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
         ; args
         ; global_resource_limiter
         ; resources = Resource.Id.Table.create ()
-        ; waiting_jobs = Queue.create ()
+        ; waiting_jobs = Doubly_linked.create ()
         ; trigger_queue_manager = Mvar.create ()
         ; close_started = false
         ; close_finished = Ivar.create ()
@@ -804,16 +804,17 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
     ;;
 
     let enqueue t job =
-      Queue.enqueue t.waiting_jobs (T job);
+      let inserted_job = Doubly_linked.insert_last t.waiting_jobs (T job) in
       (* Trigger that a new job is on the queue *)
       Mvar.set t.trigger_queue_manager ();
       upon (Job.result job) (fun _ ->
-        Queue.filter_inplace t.waiting_jobs ~f:(fun (T job') -> not (phys_same job job'));
+        if Doubly_linked.mem_elt t.waiting_jobs inserted_job
+        then Doubly_linked.remove t.waiting_jobs inserted_job;
         (* Trigger that a resource is now available *)
         Mvar.set t.trigger_queue_manager ())
     ;;
 
-    let is_empty t = Hashtbl.is_empty t.resources && Queue.is_empty t.waiting_jobs
+    let is_empty t = Hashtbl.is_empty t.resources && Doubly_linked.is_empty t.waiting_jobs
     let close_finished t = Ivar.read t.close_finished
 
     let close_and_flush' t =
@@ -821,7 +822,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       then (
         t.close_started <- true;
         if Hashtbl.is_empty t.resources
-        then Ivar.fill t.close_finished ()
+        then Ivar.fill_exn t.close_finished ()
         else (
           Mvar.set t.trigger_queue_manager ();
           Hashtbl.iter t.resources ~f:(fun r ->
@@ -1008,7 +1009,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
              Resource_list.close_and_flush' r;
              Resource_list.close_finished r))
       in
-      Ivar.fill t.close_finished ())
+      Ivar.fill_exn t.close_finished ())
     else Ivar.read t.close_finished
   ;;
 
