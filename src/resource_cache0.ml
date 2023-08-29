@@ -59,7 +59,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
         { state : state
         ; since : Time_ns.Span.t
         }
-      [@@deriving fields, sexp_of, compare]
+      [@@deriving sexp_of, compare]
     end
 
     module Resource_list = struct
@@ -69,7 +69,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
         ; queue_length : int
         ; max_time_on_queue : Time_ns.Span.t option
         }
-      [@@deriving fields, sexp_of, compare]
+      [@@deriving fields ~getters, sexp_of, compare]
 
       type t = Key.t t_ [@@deriving sexp_of, compare]
     end
@@ -78,7 +78,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       { resource_lists : 'key Resource_list.t_ list
       ; num_jobs_in_cache : int
       }
-    [@@deriving fields, sexp_of, compare]
+    [@@deriving fields ~getters, sexp_of, compare]
 
     type t = Key.t t_ [@@deriving sexp_of, compare]
 
@@ -154,7 +154,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       ; open_timeout : Time_ns.Span.t option
       ; created_at : Time_ns.t
       }
-    [@@deriving fields]
+    [@@deriving fields ~getters]
 
     let[@warning "-16"] create ?open_timeout ~give_up ~f =
       let result_ivar = Ivar.create () in

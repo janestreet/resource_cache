@@ -22,7 +22,7 @@ module type S = sig
       { state : state
       ; since : Time_ns.Span.t
       }
-    [@@deriving fields, sexp_of, compare]
+    [@@deriving sexp_of, compare]
   end
 
   module Resource_list : sig

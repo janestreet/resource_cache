@@ -70,6 +70,6 @@ type t = Stable.V3.t =
   ; close_idle_resources_when_at_limit : bool
   ; close_resource_on_unhandled_exn : bool
   }
-[@@deriving compare, fields, sexp_of]
+[@@deriving compare, fields ~iterators:create, sexp_of]
 
 let create = Fields.create

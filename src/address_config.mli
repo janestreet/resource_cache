@@ -9,7 +9,7 @@ type t =
   ; close_idle_connections_when_at_limit : bool
   ; close_connection_on_unhandled_exn : bool
   }
-[@@deriving compare, fields, sexp_of]
+[@@deriving compare, sexp_of]
 
 val create
   :  max_open_connections:int

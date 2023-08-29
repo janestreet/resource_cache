@@ -15,7 +15,7 @@ module Resource = struct
     ; id : int
     ; raise_now : unit Ivar.t
     }
-  [@@deriving fields]
+  [@@deriving fields ~getters]
 
   let counter = ref 0
 

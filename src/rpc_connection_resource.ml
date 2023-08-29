@@ -15,7 +15,7 @@ module T = struct
     ; resource : 'a
     ; address : Host_and_port.t
     }
-  [@@deriving fields]
+  [@@deriving fields ~getters]
 end
 
 include T

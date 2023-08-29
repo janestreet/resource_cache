@@ -14,7 +14,7 @@ type t =
   (** if [close_resource_on_unhandled_exn] is set to true, when the resource raises an exn
       after creation, it will be [close]d. *)
   }
-[@@deriving compare, fields, sexp_of]
+[@@deriving compare, sexp_of]
 
 val create
   :  max_resources:int
