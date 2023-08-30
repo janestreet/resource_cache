@@ -104,12 +104,12 @@ end = struct
     }
 
   let assert_resource_available
-        ?(release = Deferred.unit)
-        ?r_ivar
-        ?give_up
-        ?load_balance
-        t
-        args
+    ?(release = Deferred.unit)
+    ?r_ivar
+    ?give_up
+    ?load_balance
+    t
+    args
     =
     let f r =
       let%bind () = release in
@@ -272,10 +272,8 @@ let%expect_test "[f] raises" =
      closed. *)
   let%bind () =
     match%map
-      Deferred.Or_error.try_with_join
-        ~run:`Schedule
-        ~rest:`Log
-        (fun () -> get_resource ~f:(fun _ -> failwith "failure") t [ 0 ])
+      Deferred.Or_error.try_with_join ~run:`Schedule ~rest:`Log (fun () ->
+        get_resource ~f:(fun _ -> failwith "failure") t [ 0 ])
     with
     | Ok (_r, _res) -> failwith "exn should have been caught"
     | Error e -> show_raise ~hide_positions:true (fun () -> Error.raise e)
@@ -310,9 +308,9 @@ let%expect_test "[f] when it is enqueued raises to correct monitor and cleans up
       Monitor.try_with
         ~rest:(`Call (fun exn -> print_s [%message "unexpected exception" (exn : exn)]))
         (fun () ->
-           let r0 = Open_resource.create ~now:true t [ 0 ] in
-           let%map (_ : Resource.t) = r0.resource in
-           r0)
+          let r0 = Open_resource.create ~now:true t [ 0 ] in
+          let%map (_ : Resource.t) = r0.resource in
+          r0)
     with
     | Ok r0 -> r0
     | Error exn -> raise exn

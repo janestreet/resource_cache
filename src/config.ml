@@ -46,8 +46,8 @@ module Stable = struct
       }
     [@@deriving
       bin_io
-    , sexp
-    , stable_record ~version:V2.t ~add:[ close_idle_resources_when_at_limit ]]
+      , sexp
+      , stable_record ~version:V2.t ~add:[ close_idle_resources_when_at_limit ]]
 
     let to_v2 = to_V2_t ~close_idle_resources_when_at_limit:false
 

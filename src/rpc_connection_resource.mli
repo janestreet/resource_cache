@@ -16,6 +16,6 @@ val address : _ t -> Host_and_port.t
 
 module Make (R : Rpc_resource) :
   Resource.S
-  with module Key = Host_and_port
-   and module Common_args = Unit
-   and type t = R.t t
+    with module Key = Host_and_port
+     and module Common_args = Unit
+     and type t = R.t t

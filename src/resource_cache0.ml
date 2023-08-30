@@ -117,7 +117,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
          | `Gave_up_waiting_for_resource
          | Delayed_failures.t
          ]
-           Deferred.t
+         Deferred.t
 
     val f : 'a t -> R.t -> 'a Deferred.t
     val open_timeout : 'a t -> Time_ns.Span.t option
@@ -137,7 +137,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
            | (* This case is not possible, but the compiler gets mad otherwise *)
              `Gave_up_waiting_for_resource
            ]
-             Deferred.t
+           Deferred.t
       -> unit
 
     val mark_cache_closed : 'a t -> unit
@@ -149,8 +149,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
           | `Gave_up_waiting_for_resource
           | Delayed_failures.t
           ]
-            Deferred.t
-            Ivar.t
+          Deferred.t
+          Ivar.t
       ; open_timeout : Time_ns.Span.t option
       ; created_at : Time_ns.t
       }
@@ -298,10 +298,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
           | None -> Deferred.unit
           | Some r ->
             (match%map
-               Monitor.try_with
-                 ~run:`Schedule
-                 ~rest:`Log
-                 (fun () -> if R.has_close_started r then Deferred.unit else R.close r)
+               Monitor.try_with ~run:`Schedule ~rest:`Log (fun () ->
+                 if R.has_close_started r then Deferred.unit else R.close r)
              with
              | Ok () -> ()
              | Error exn ->
@@ -361,10 +359,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
         (* deliberately not filling [done_] here.
            It is filled in [set_idle] or [close]. *)
         let result =
-          Monitor.try_with
-            ~run:`Schedule
-            ~rest:`Log
-            (fun () -> f (Set_once.get_exn t.resource [%here]))
+          Monitor.try_with ~run:`Schedule ~rest:`Log (fun () ->
+            f (Set_once.get_exn t.resource [%here]))
         in
         upon result (function
           | Ok _ -> set_idle t
@@ -412,10 +408,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
            Option.iter !resource ~f:(fun resource ->
              don't_wait_for
                (Deferred.ignore_m
-                  (Monitor.try_with
-                     ~run:`Schedule
-                     ~rest:`Log
-                     (fun () -> R.close resource))))
+                  (Monitor.try_with ~run:`Schedule ~rest:`Log (fun () -> R.close resource))))
          in
          let name =
            if am_running_test then None else Some (Source_code_position.to_string [%here])
@@ -426,9 +419,9 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
            ~rest:
              (if config.close_resource_on_unhandled_exn then `Call close_on_exn else `Log)
            (fun () ->
-              let%map.Deferred.Or_error res = f () in
-              resource := Some res;
-              res))
+             let%map.Deferred.Or_error res = f () in
+             resource := Some res;
+             res))
         >>| Result.map_error ~f:Error.of_exn
         |> Deferred.map ~f:Or_error.join
       in
@@ -484,7 +477,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
     val on_resource_state_update
       :  t
       -> (Resource.t -> [ `Idle | `In_use_until of unit Ivar.t | `Closing ] -> unit)
-           Staged.t
+         Staged.t
   end = struct
     module Lru = Hash_queue.Make (Resource.Id)
 
@@ -544,8 +537,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       -> with_:(R.t -> 'a Deferred.t)
       -> log_error:(string -> unit)
       -> [ `Result of
-             Resource.t
-             * [> `Result of R.Key.t * ('a, exn) Result.t | Delayed_failures.t ] Deferred.t
+           Resource.t
+           * [> `Result of R.Key.t * ('a, exn) Result.t | Delayed_failures.t ] Deferred.t
          | `Cache_is_closed
          | `No_resource_available_until of unit Deferred.t
          ]
@@ -659,7 +652,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       -> t
       -> f:(R.t -> 'a Deferred.t)
       -> [> `Result of R.Key.t * ('a, exn) Result.t | Delayed_failures.t ] Deferred.t
-           option
+         option
 
     val enqueue : t -> 'a Job.t -> unit
     val num_open : t -> int
@@ -685,7 +678,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       let max_time_on_queue =
         Doubly_linked.first t.waiting_jobs
         |> Option.map ~f:(fun (T job) ->
-          Time_ns.diff (Time_ns.now ()) (Job.created_at job))
+             Time_ns.diff (Time_ns.now ()) (Job.created_at job))
       in
       { Status.Resource_list.key = t.key
       ; resources = Hashtbl.data t.resources |> List.map ~f:Resource.status
@@ -890,12 +883,12 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
   ;;
 
   let with_any'
-        ?open_timeout
-        ?(give_up = Deferred.never ())
-        ?(load_balance = false)
-        t
-        keys
-        ~f
+    ?open_timeout
+    ?(give_up = Deferred.never ())
+    ?(load_balance = false)
+    t
+    keys
+    ~f
     =
     let f resource = f (R.underlying resource) in
     t.num_jobs_in_cache <- t.num_jobs_in_cache + 1;
@@ -1006,8 +999,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
         Deferred.all_unit
           (Global_resource_limiter.close_and_flush t.global_resource_limiter
            :: List.map (Hashtbl.data t.cache) ~f:(fun r ->
-             Resource_list.close_and_flush' r;
-             Resource_list.close_finished r))
+                Resource_list.close_and_flush' r;
+                Resource_list.close_finished r))
       in
       Ivar.fill_exn t.close_finished ())
     else Ivar.read t.close_finished

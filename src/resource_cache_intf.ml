@@ -49,8 +49,7 @@ module type S = sig
        | `Error_opening_resource of Error.t
        | `Cache_is_closed
        ]
-         Deferred.t
-
+       Deferred.t
 
   (** Like [with_] and [with_'] except [f] is run on the first matching available resource
       (or the first resource that has availability to be opened).
@@ -80,7 +79,7 @@ module type S = sig
        | `Gave_up_waiting_for_resource
        | `Cache_is_closed
        ]
-         Deferred.t
+       Deferred.t
 
   (** Tries [with_any'] in a loop (removing args that have open errors) until receiving an
       [`Ok], or until it has failed to open all resources in [args_list]. *)
@@ -96,7 +95,7 @@ module type S = sig
        | `Gave_up_waiting_for_resource
        | `Cache_is_closed
        ]
-         Deferred.t
+       Deferred.t
 
   val close_started : t -> bool
   val close_finished : t -> unit Deferred.t
@@ -107,12 +106,10 @@ module type S = sig
       returned [Deferred.t] is determined when all jobs have finished running and all
       resources have been closed. *)
   val close_and_flush : t -> unit Deferred.t
-
 end
 
 module type Resource_cache = sig
   module type S = S
-
 
   (** [Cache.Make] creates a cache module that exposes a simple [with_] interface over its
       resources. The cache has the following properties:
@@ -133,23 +130,23 @@ module type Resource_cache = sig
   *)
   module Make (R : Resource.S) () :
     S
-    with type key := R.Key.t
-     and type common_args := R.Common_args.t
-     and type resource := R.t
+      with type key := R.Key.t
+       and type common_args := R.Common_args.t
+       and type resource := R.t
 
   (** Wrap a resource that does not natively support a [has_close_started] operation
       in a simple record to add such tracking. *)
   module Make_simple (R : Resource.Simple) () :
     S
-    with type key := R.Key.t
-     and type common_args := R.Common_args.t
-     and type resource := R.t
+      with type key := R.Key.t
+       and type common_args := R.Common_args.t
+       and type resource := R.t
 
   (** Make a cache from a resource where the type clients wish to operate on is
       derived from, but not necessarily equal to, the type held by the cache. *)
   module Make_wrapped (R : Resource.S_wrapped) () :
     S
-    with type key := R.Key.t
-     and type common_args := R.Common_args.t
-     and type resource := R.resource
+      with type key := R.Key.t
+       and type common_args := R.Common_args.t
+       and type resource := R.resource
 end
