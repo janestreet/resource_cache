@@ -6,7 +6,12 @@ let () = Backtrace.elide := true
 
 module Resource = struct
   module Key = Int
-  module Common_args = Unit
+
+  module Common_args = struct
+    type t = { block_open_until : unit Deferred.t }
+
+    let default = { block_open_until = return () }
+  end
 
   type t =
     { mutable status : [ `Open | `Closed ]
@@ -19,7 +24,7 @@ module Resource = struct
 
   let counter = ref 0
 
-  let open_ key () =
+  let open_ key ({ block_open_until } : Common_args.t) =
     let raise_now = Ivar.create () in
     don't_wait_for
       (let%map () = Ivar.read raise_now in
@@ -27,6 +32,7 @@ module Resource = struct
     let id = !counter in
     counter := !counter + 1;
     printf "Opening %d,%d\n" key id;
+    let%bind () = block_open_until in
     Deferred.Or_error.return
       { status = `Open; close_finished = Ivar.create (); key; id; raise_now }
   ;;
@@ -164,7 +170,7 @@ let config =
 ;;
 
 let%expect_test "respect [max_resources_per_id]" =
-  let t = Test_cache.init ~config () in
+  let t = Test_cache.init ~config Resource.Common_args.default in
   (* Open a resource. *)
   let r0 = Open_resource.create ~now:true t [ 0 ] in
   let%bind (_ : Resource.t) = r0.resource in
@@ -200,7 +206,7 @@ let%expect_test "respect [max_resources_per_id]" =
 ;;
 
 let%expect_test "respect [max_resources]" =
-  let t = Test_cache.init ~config () in
+  let t = Test_cache.init ~config Resource.Common_args.default in
   (* Open a resource and release it immediately. *)
   let r0 = Open_resource.create ~now:true t [ 0 ] in
   let%bind r0_resource = r0.resource in
@@ -238,7 +244,7 @@ let%expect_test "respect [max_resources]" =
 ;;
 
 let%expect_test "[with_any] respects order" =
-  let t = Test_cache.init ~config () in
+  let t = Test_cache.init ~config Resource.Common_args.default in
   (* Open any of [0; 1]. We should get 0 because [with_any] respects order. *)
   let r0 = Open_resource.create ~now:true t [ 0; 1 ] in
   let%bind (_ : Resource.t) = r0.resource in
@@ -267,7 +273,7 @@ let%expect_test "[with_any] respects order" =
 ;;
 
 let%expect_test "[f] raises" =
-  let t = Test_cache.init ~config () in
+  let t = Test_cache.init ~config Resource.Common_args.default in
   (* Open a resource and pass through an [f] that raises. Make sure the resource is
      closed. *)
   let%bind () =
@@ -299,7 +305,7 @@ let%expect_test "[f] when it is enqueued raises to correct monitor and cleans up
         ; close_idle_resources_when_at_limit = false
         ; close_resource_on_unhandled_exn = false
         }
-      ()
+      Resource.Common_args.default
   in
   (* Open up a resource so we are triggering the case where we need to enqueue a [Job.t]
   *)
@@ -357,7 +363,7 @@ let%expect_test "[f] when it is enqueued raises to correct monitor and cleans up
 ;;
 
 let%expect_test "close_and_flush with nothing open" =
-  let t = Test_cache.init ~config () in
+  let t = Test_cache.init ~config Resource.Common_args.default in
   let%bind () = close_and_flush t in
   [%expect {|
       Closing cache
@@ -367,7 +373,7 @@ let%expect_test "close_and_flush with nothing open" =
 ;;
 
 let%expect_test "close_and_flush closes resources" =
-  let t = Test_cache.init ~config () in
+  let t = Test_cache.init ~config Resource.Common_args.default in
   (* Open a resource *)
   let r0 = Open_resource.create ~now:true t [ 0 ] in
   let%bind (_ : Resource.t) = r0.resource in
@@ -395,7 +401,7 @@ let%expect_test "close_and_flush closes resources" =
 ;;
 
 let%expect_test "close_and_flush clears queue, waits for all jobs to finish" =
-  let t = Test_cache.init ~config () in
+  let t = Test_cache.init ~config Resource.Common_args.default in
   (* Open a resource *)
   let r0 = Open_resource.create ~now:true t [ 0 ] in
   let%bind (_ : Resource.t) = r0.resource in
@@ -433,7 +439,7 @@ let test_load_balance ~load_balance =
         ; close_idle_resources_when_at_limit = false
         ; close_resource_on_unhandled_exn = false
         }
-      ()
+      Resource.Common_args.default
   in
   let%bind () =
     List.init 10 ~f:(fun (_ : int) ->
@@ -553,7 +559,7 @@ let%expect_test "close idle resources when at limit" =
     ; close_resource_on_unhandled_exn = false
     }
   in
-  let t = Test_cache.init ~config () in
+  let t = Test_cache.init ~config Resource.Common_args.default in
   (* Open a resource. *)
   let r0 = Open_resource.create ~now:true t [ 0 ] in
   let%bind r0_resource = r0.resource in
@@ -609,7 +615,7 @@ let%expect_test "raise after open" =
       ; close_resource_on_unhandled_exn
       }
     in
-    let t = Test_cache.init ~config () in
+    let t = Test_cache.init ~config Resource.Common_args.default in
     Test_cache.with_ t 0 ~f:(fun r ->
       Ivar.fill_exn r.raise_now ();
       Log.flushed (force Log.Global.log))
@@ -633,5 +639,30 @@ let%expect_test "raise after open" =
          (exn
           ("Resource raised exn after creation" (key 0)
            (monitor.ml.Error "Raising as requested" ("<backtrace elided in test>"))))) |}];
+  return ()
+;;
+
+let%expect_test "regression test: don't hang if open_ is in progress when \
+                 close_and_flush is called"
+  =
+  Log.Global.set_output
+    [ Log.For_testing.create_output ~map_output:(fun x ->
+        Sexp.to_string_hum (Sexp.of_string x))
+    ];
+  let block_open_until = Ivar.create () in
+  let t = Test_cache.init ~config { block_open_until = Ivar.read block_open_until } in
+  let (_ : unit Or_error.t Deferred.t) =
+    Test_cache.with_ t 0 ~f:(fun r ->
+      printf "Running with id %d" r.id;
+      return ())
+  in
+  let%bind () = Scheduler.yield_until_no_jobs_remain () in
+  [%expect {| Opening 0,0 |}];
+  let closing = close_and_flush t in
+  [%expect {|
+    Closing cache |}];
+  Ivar.fill_exn block_open_until ();
+  let%bind () = closing in
+  [%expect {| Closed cache |}];
   return ()
 ;;

@@ -426,6 +426,11 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
         |> Deferred.map ~f:Or_error.join
       in
       let res =
+        let error_or_close_while_opening result =
+          (* Ensure [close_finished] gets filled *)
+          don't_wait_for (close t);
+          return result
+        in
         match%bind
           maybe_catch_unhandled_exns_and_close ~f:(fun () ->
             match open_timeout with
@@ -458,11 +463,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
             Set_once.set_exn t.resource [%here] res;
             let%map r = unsafe_immediate t ~f:with_ in
             `Result (key, r))
-          else return `Cache_is_closed
-        | Error err ->
-          (* Ensure [close_finished] gets filled *)
-          don't_wait_for (close t);
-          return (`Error_opening_resource (key, err))
+          else error_or_close_while_opening `Cache_is_closed
+        | Error err -> error_or_close_while_opening (`Error_opening_resource (key, err))
       in
       t, res
     ;;

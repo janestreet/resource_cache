@@ -1,7 +1,7 @@
 open! Core
 open! Async
+open Test_cache
 module Time = Time_float_unix
-module Test_cache = Test_cache.Test_cache
 
 let main ~iterations ~duration ~cache_slots ~close_idle_resources_when_at_limit =
   let config =
@@ -13,7 +13,7 @@ let main ~iterations ~duration ~cache_slots ~close_idle_resources_when_at_limit 
     ; close_resource_on_unhandled_exn = false
     }
   in
-  let t = Test_cache.init ~config () in
+  let t = Test_cache.init ~config Resource.Common_args.default in
   let completed = ref 0 in
   let done_ = Ivar.create () in
   let f _ =
