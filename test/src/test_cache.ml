@@ -633,12 +633,12 @@ let%expect_test "raise after open" =
   [%expect
     {|
         Opening 0,0
-        Closing 0,0
         ("Exception raised to [Monitor.try_with] that already returned."
          "This error was captured by a default handler in [Async.Log]."
          (exn
           ("Resource raised exn after creation" (key 0)
-           (monitor.ml.Error "Raising as requested" ("<backtrace elided in test>"))))) |}];
+           (monitor.ml.Error "Raising as requested" ("<backtrace elided in test>")))))
+        Closing 0,0 |}];
   return ()
 ;;
 
