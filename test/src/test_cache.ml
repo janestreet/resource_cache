@@ -175,14 +175,12 @@ let%expect_test "respect [max_resources_per_id]" =
   let r0 = Open_resource.create ~now:true t [ 0 ] in
   let%bind (_ : Resource.t) = r0.resource in
   [%expect {|
-      Opening 0,0
-      Got resource 0,0
+    Opening 0,0
+    Got resource 0,0
     |}];
   (* Only 1 resource is allowed per id. *)
   let%bind () = assert_no_resource_available_now t [ 0 ] in
-  [%expect {|
-      Error getting (0): "Gave up waiting for resource"
-    |}];
+  [%expect {| Error getting (0): "Gave up waiting for resource" |}];
   (* Release the original resource. *)
   let%bind () = r0.release () in
   [%expect {| Releasing resource 0,0 |}];
@@ -193,14 +191,14 @@ let%expect_test "respect [max_resources_per_id]" =
   (* Close on release because the [max_resource_reuse] is 2. *)
   let%bind () = r0'.release () in
   [%expect {|
-      Releasing resource 0,0
-      Closing 0,0
+    Releasing resource 0,0
+    Closing 0,0
     |}];
   (* Close and flush with no resources open. *)
   let%bind () = close_and_flush t in
   [%expect {|
-      Closing cache
-      Closed cache
+    Closing cache
+    Closed cache
     |}];
   return ()
 ;;
@@ -211,35 +209,33 @@ let%expect_test "respect [max_resources]" =
   let r0 = Open_resource.create ~now:true t [ 0 ] in
   let%bind r0_resource = r0.resource in
   let%bind () = r0.release () in
-  [%expect
-    {|
-      Opening 0,0
-      Got resource 0,0
-      Releasing resource 0,0
+  [%expect {|
+    Opening 0,0
+    Got resource 0,0
+    Releasing resource 0,0
     |}];
   (* Open a resource with a different key and release it immediately. *)
   let r1 = Open_resource.create ~now:true t [ 1 ] in
   let%bind (_ : Resource.t) = r1.resource in
   let%bind () = r1.release () in
-  [%expect
-    {|
-      Opening 1,1
-      Got resource 1,1
-      Releasing resource 1,1
+  [%expect {|
+    Opening 1,1
+    Got resource 1,1
+    Releasing resource 1,1
     |}];
   (* We can't open a resource with a different key because [max_resources] is 2. *)
   let%bind () = assert_no_resource_available_now t [ 2 ] in
-  [%expect {|
-      Error getting (2): "Gave up waiting for resource" |}];
+  [%expect {| Error getting (2): "Gave up waiting for resource" |}];
   (* Open a resource with a different key, without giving up. *)
   let r2 = Open_resource.create t [ 2 ] in
   (* Once we explicitly close a previous resource, we have capacity. *)
   let%bind () = Resource.close r0_resource in
   let%bind (_ : Resource.t) = r2.resource in
   [%expect {|
-      Closing 0,0
-      Opening 2,2
-      Got resource 2,2 |}];
+    Closing 0,0
+    Opening 2,2
+    Got resource 2,2
+    |}];
   return ()
 ;;
 
@@ -249,15 +245,17 @@ let%expect_test "[with_any] respects order" =
   let r0 = Open_resource.create ~now:true t [ 0; 1 ] in
   let%bind (_ : Resource.t) = r0.resource in
   [%expect {|
-      Opening 0,0
-      Got resource 0,0 |}];
+    Opening 0,0
+    Got resource 0,0
+    |}];
   (* Open any of [0; 1]. We should get a resource 1 because there is already a 0 resource
      in use (and the limit per key is 1). *)
   let r1 = Open_resource.create ~now:true t [ 0; 1 ] in
   let%bind (_ : Resource.t) = r1.resource in
   [%expect {|
-      Opening 1,1
-      Got resource 1,1 |}];
+    Opening 1,1
+    Got resource 1,1
+    |}];
   (* Now, neither of [0; 1] are available immediately. *)
   let%bind () = assert_no_resource_available_now t [ 0; 1 ] in
   [%expect {| Error getting (0 1): "Gave up waiting for resource" |}];
@@ -267,8 +265,7 @@ let%expect_test "[with_any] respects order" =
   (* Make sure we can now get resource 0. *)
   let r0' = Open_resource.create ~now:true t [ 0; 1 ] in
   let%bind (_ : Resource.t) = r0'.resource in
-  [%expect {|
-      Got resource 0,0 |}];
+  [%expect {| Got resource 0,0 |}];
   return ()
 ;;
 
@@ -286,10 +283,11 @@ let%expect_test "[f] raises" =
   in
   [%expect
     {|
-      Opening 0,0
-      Got resource 0,0
-      Closing 0,0
-      (raised (monitor.ml.Error (Failure failure) ("<backtrace elided in test>"))) |}];
+    Opening 0,0
+    Got resource 0,0
+    Closing 0,0
+    (raised (monitor.ml.Error (Failure failure) ("<backtrace elided in test>")))
+    |}];
   return ()
 ;;
 
@@ -323,7 +321,8 @@ let%expect_test "[f] when it is enqueued raises to correct monitor and cleans up
   in
   [%expect {|
     Opening 0,0
-    Got resource 0,0 |}];
+    Got resource 0,0
+    |}];
   let deferred_result =
     Monitor.try_with ~name:"usage" (fun () ->
       get_resource ~f:(fun _ -> failwith "from within usage monitor") t [ 0 ])
@@ -333,7 +332,8 @@ let%expect_test "[f] when it is enqueued raises to correct monitor and cleans up
   let%bind () = r0.release () in
   [%expect {|
     Releasing resource 0,0
-    Got resource 0,0 |}];
+    Got resource 0,0
+    |}];
   let%bind () =
     match%map deferred_result with
     | Ok _ -> failwith "an exception was expected"
@@ -348,7 +348,8 @@ let%expect_test "[f] when it is enqueued raises to correct monitor and cleans up
     (raised (
       monitor.ml.Error
       (Failure "from within usage monitor")
-      ("<backtrace elided in test>"))) |}];
+      ("<backtrace elided in test>")))
+    |}];
   (* Because of the exception, the resource should be closed. There is now capacity for a
      new resource to be opened. *)
   let%bind () =
@@ -358,7 +359,8 @@ let%expect_test "[f] when it is enqueued raises to correct monitor and cleans up
   in
   [%expect {|
     Opening 0,1
-    Got resource 0,1 |}];
+    Got resource 0,1
+    |}];
   return ()
 ;;
 
@@ -366,8 +368,8 @@ let%expect_test "close_and_flush with nothing open" =
   let t = Test_cache.init ~config Resource.Common_args.default in
   let%bind () = close_and_flush t in
   [%expect {|
-      Closing cache
-      Closed cache
+    Closing cache
+    Closed cache
     |}];
   return ()
 ;;
@@ -378,25 +380,24 @@ let%expect_test "close_and_flush closes resources" =
   let r0 = Open_resource.create ~now:true t [ 0 ] in
   let%bind (_ : Resource.t) = r0.resource in
   [%expect {|
-      Opening 0,0
-      Got resource 0,0 |}];
+    Opening 0,0
+    Got resource 0,0
+    |}];
   (* Release the resource *)
   let%bind () = r0.release () in
-  [%expect {|
-      Releasing resource 0,0 |}];
+  [%expect {| Releasing resource 0,0 |}];
   (* [close_and_flush] should close the idle resource. *)
   let%bind () = close_and_flush t in
   [%expect {|
-      Closing cache
-      Closing 0,0
-      Closed cache |}];
+    Closing cache
+    Closing 0,0
+    Closed cache
+    |}];
   assert (Test_cache.close_started t);
   let%bind () = assert_no_resource_available_now t [ 0 ] in
-  [%expect {|
-      Error getting (0): "Cache is closed" |}];
+  [%expect {| Error getting (0): "Cache is closed" |}];
   let%bind () = assert_no_resource_available t [ 0 ] in
-  [%expect {|
-      Error getting (0): "Cache is closed" |}];
+  [%expect {| Error getting (0): "Cache is closed" |}];
   return ()
 ;;
 
@@ -406,8 +407,9 @@ let%expect_test "close_and_flush clears queue, waits for all jobs to finish" =
   let r0 = Open_resource.create ~now:true t [ 0 ] in
   let%bind (_ : Resource.t) = r0.resource in
   [%expect {|
-      Opening 0,0
-      Got resource 0,0 |}];
+    Opening 0,0
+    Got resource 0,0
+    |}];
   (* Start waiting for resource 0  *)
   let waiting_for_r0 = assert_no_resource_available t [ 0 ] in
   (* [close_and_flush] while there is a job waiting for a resource. *)
@@ -416,15 +418,17 @@ let%expect_test "close_and_flush clears queue, waits for all jobs to finish" =
   (* The waiting job stops waiting. *)
   let%bind () = waiting_for_r0 in
   [%expect {|
-      Closing cache
-      Error getting (0): "Cache is closed" |}];
+    Closing cache
+    Error getting (0): "Cache is closed"
+    |}];
   (* Release the open resource. Now, [closed_and_flushed] will become determined. *)
   let%bind () = r0.release () in
   let%bind () = closed_and_flushed in
   [%expect {|
-      Releasing resource 0,0
-      Closing 0,0
-      Closed cache |}];
+    Releasing resource 0,0
+    Closing 0,0
+    Closed cache
+    |}];
   return ()
 ;;
 
@@ -496,7 +500,8 @@ let%expect_test "without load balancing" =
     Closing 1,8
     Closing 1,9
     Closing cache
-    Closed cache |}];
+    Closed cache
+    |}];
   return ()
 ;;
 
@@ -545,7 +550,8 @@ let%expect_test "with load balancing" =
     Closing 0,8
     Closing 1,9
     Closing cache
-    Closed cache |}];
+    Closed cache
+    |}];
   return ()
 ;;
 
@@ -565,21 +571,21 @@ let%expect_test "close idle resources when at limit" =
   let%bind r0_resource = r0.resource in
   [%expect {|
     Opening 0,0
-    Got resource 0,0 |}];
+    Got resource 0,0
+    |}];
   (* Open another resource with the same key. *)
   let r0' = Open_resource.create ~now:true t [ 0 ] in
   let%bind r0'_resource = r0'.resource in
   [%expect {|
     Opening 0,1
-    Got resource 0,1 |}];
+    Got resource 0,1
+    |}];
   (* Release the first resource. *)
   let%bind () = r0.release () in
-  [%expect {|
-    Releasing resource 0,0 |}];
+  [%expect {| Releasing resource 0,0 |}];
   (* Release the second resource. *)
   let%bind () = r0'.release () in
-  [%expect {|
-    Releasing resource 0,1 |}];
+  [%expect {| Releasing resource 0,1 |}];
   (* There are 2 idle resources. [r0] is the least recently used. Trying to get a
      resource with key 1 results in closing [r0] to make room. *)
   let r1 = Open_resource.create t [ 1 ] in
@@ -588,7 +594,8 @@ let%expect_test "close idle resources when at limit" =
   [%expect {|
     Closing 0,0
     Opening 1,2
-    Got resource 1,2 |}];
+    Got resource 1,2
+    |}];
   (* Now we close [r0'] to make room. *)
   let r1' = Open_resource.create t [ 1 ] in
   let%bind () = Resource.close_finished r0'_resource in
@@ -596,7 +603,8 @@ let%expect_test "close idle resources when at limit" =
   [%expect {|
     Closing 0,1
     Opening 1,3
-    Got resource 1,3 |}];
+    Got resource 1,3
+    |}];
   return ()
 ;;
 
@@ -624,21 +632,23 @@ let%expect_test "raise after open" =
   let%bind () = test ~close_resource_on_unhandled_exn:false in
   [%expect
     {|
-        Opening 0,0
-        ("Exception raised to [Monitor.try_with] that already returned."
-         "This error was captured by a default handler in [Async.Log]."
-         (exn
-          (monitor.ml.Error "Raising as requested" ("<backtrace elided in test>")))) |}];
+    Opening 0,0
+    ("Exception raised to [Monitor.try_with] that already returned."
+     "This error was captured by a default handler in [Async.Log]."
+     (exn
+      (monitor.ml.Error "Raising as requested" ("<backtrace elided in test>"))))
+    |}];
   let%bind () = test ~close_resource_on_unhandled_exn:true in
   [%expect
     {|
-        Opening 0,0
-        ("Exception raised to [Monitor.try_with] that already returned."
-         "This error was captured by a default handler in [Async.Log]."
-         (exn
-          ("Resource raised exn after creation" (key 0)
-           (monitor.ml.Error "Raising as requested" ("<backtrace elided in test>")))))
-        Closing 0,0 |}];
+    Opening 0,0
+    ("Exception raised to [Monitor.try_with] that already returned."
+     "This error was captured by a default handler in [Async.Log]."
+     (exn
+      ("Resource raised exn after creation" (key 0)
+       (monitor.ml.Error "Raising as requested" ("<backtrace elided in test>")))))
+    Closing 0,0
+    |}];
   return ()
 ;;
 
@@ -659,8 +669,7 @@ let%expect_test "regression test: don't hang if open_ is in progress when \
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   [%expect {| Opening 0,0 |}];
   let closing = close_and_flush t in
-  [%expect {|
-    Closing cache |}];
+  [%expect {| Closing cache |}];
   Ivar.fill_exn block_open_until ();
   let%bind () = closing in
   [%expect {| Closed cache |}];
