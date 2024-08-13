@@ -117,7 +117,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
          | `Gave_up_waiting_for_resource
          | Delayed_failures.t
          ]
-         Deferred.t
+           Deferred.t
 
     val f : 'a t -> R.t -> 'a Deferred.t
     val open_timeout : 'a t -> Time_ns.Span.t option
@@ -137,7 +137,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
            | (* This case is not possible, but the compiler gets mad otherwise *)
              `Gave_up_waiting_for_resource
            ]
-           Deferred.t
+             Deferred.t
       -> unit
 
     val mark_cache_closed : 'a t -> unit
@@ -149,8 +149,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
           | `Gave_up_waiting_for_resource
           | Delayed_failures.t
           ]
-          Deferred.t
-          Ivar.t
+            Deferred.t
+            Ivar.t
       ; open_timeout : Time_ns.Span.t option
       ; created_at : Time_ns.t
       }
@@ -479,7 +479,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
     val on_resource_state_update
       :  t
       -> (Resource.t -> [ `Idle | `In_use_until of unit Ivar.t | `Closing ] -> unit)
-         Staged.t
+           Staged.t
   end = struct
     module Lru = Hash_queue.Make (Resource.Id)
 
@@ -654,7 +654,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       -> t
       -> f:(R.t -> 'a Deferred.t)
       -> [> `Result of R.Key.t * ('a, exn) Result.t | Delayed_failures.t ] Deferred.t
-         option
+           option
 
     val enqueue : t -> 'a Job.t -> unit
     val num_open : t -> int
@@ -680,7 +680,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       let max_time_on_queue =
         Doubly_linked.first t.waiting_jobs
         |> Option.map ~f:(fun (T job) ->
-             Time_ns.diff (Time_ns.now ()) (Job.created_at job))
+          Time_ns.diff (Time_ns.now ()) (Job.created_at job))
       in
       { Status.Resource_list.key = t.key
       ; resources = Hashtbl.data t.resources |> List.map ~f:Resource.status
@@ -1001,8 +1001,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
         Deferred.all_unit
           (Global_resource_limiter.close_and_flush t.global_resource_limiter
            :: List.map (Hashtbl.data t.cache) ~f:(fun r ->
-                Resource_list.close_and_flush' r;
-                Resource_list.close_finished r))
+             Resource_list.close_and_flush' r;
+             Resource_list.close_finished r))
       in
       Ivar.fill_exn t.close_finished ())
     else Ivar.read t.close_finished

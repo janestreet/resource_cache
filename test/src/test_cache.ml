@@ -174,7 +174,8 @@ let%expect_test "respect [max_resources_per_id]" =
   (* Open a resource. *)
   let r0 = Open_resource.create ~now:true t [ 0 ] in
   let%bind (_ : Resource.t) = r0.resource in
-  [%expect {|
+  [%expect
+    {|
     Opening 0,0
     Got resource 0,0
     |}];
@@ -190,13 +191,15 @@ let%expect_test "respect [max_resources_per_id]" =
   [%expect {| Got resource 0,0 |}];
   (* Close on release because the [max_resource_reuse] is 2. *)
   let%bind () = r0'.release () in
-  [%expect {|
+  [%expect
+    {|
     Releasing resource 0,0
     Closing 0,0
     |}];
   (* Close and flush with no resources open. *)
   let%bind () = close_and_flush t in
-  [%expect {|
+  [%expect
+    {|
     Closing cache
     Closed cache
     |}];
@@ -209,7 +212,8 @@ let%expect_test "respect [max_resources]" =
   let r0 = Open_resource.create ~now:true t [ 0 ] in
   let%bind r0_resource = r0.resource in
   let%bind () = r0.release () in
-  [%expect {|
+  [%expect
+    {|
     Opening 0,0
     Got resource 0,0
     Releasing resource 0,0
@@ -218,7 +222,8 @@ let%expect_test "respect [max_resources]" =
   let r1 = Open_resource.create ~now:true t [ 1 ] in
   let%bind (_ : Resource.t) = r1.resource in
   let%bind () = r1.release () in
-  [%expect {|
+  [%expect
+    {|
     Opening 1,1
     Got resource 1,1
     Releasing resource 1,1
@@ -231,7 +236,8 @@ let%expect_test "respect [max_resources]" =
   (* Once we explicitly close a previous resource, we have capacity. *)
   let%bind () = Resource.close r0_resource in
   let%bind (_ : Resource.t) = r2.resource in
-  [%expect {|
+  [%expect
+    {|
     Closing 0,0
     Opening 2,2
     Got resource 2,2
@@ -244,7 +250,8 @@ let%expect_test "[with_any] respects order" =
   (* Open any of [0; 1]. We should get 0 because [with_any] respects order. *)
   let r0 = Open_resource.create ~now:true t [ 0; 1 ] in
   let%bind (_ : Resource.t) = r0.resource in
-  [%expect {|
+  [%expect
+    {|
     Opening 0,0
     Got resource 0,0
     |}];
@@ -252,7 +259,8 @@ let%expect_test "[with_any] respects order" =
      in use (and the limit per key is 1). *)
   let r1 = Open_resource.create ~now:true t [ 0; 1 ] in
   let%bind (_ : Resource.t) = r1.resource in
-  [%expect {|
+  [%expect
+    {|
     Opening 1,1
     Got resource 1,1
     |}];
@@ -319,7 +327,8 @@ let%expect_test "[f] when it is enqueued raises to correct monitor and cleans up
     | Ok r0 -> r0
     | Error exn -> raise exn
   in
-  [%expect {|
+  [%expect
+    {|
     Opening 0,0
     Got resource 0,0
     |}];
@@ -330,7 +339,8 @@ let%expect_test "[f] when it is enqueued raises to correct monitor and cleans up
   (* Release the used resource so the above [get_resource] call grabs the available
      resource *)
   let%bind () = r0.release () in
-  [%expect {|
+  [%expect
+    {|
     Releasing resource 0,0
     Got resource 0,0
     |}];
@@ -357,7 +367,8 @@ let%expect_test "[f] when it is enqueued raises to correct monitor and cleans up
     | Error error -> Error.raise error
     | Ok (_, ()) -> ()
   in
-  [%expect {|
+  [%expect
+    {|
     Opening 0,1
     Got resource 0,1
     |}];
@@ -367,7 +378,8 @@ let%expect_test "[f] when it is enqueued raises to correct monitor and cleans up
 let%expect_test "close_and_flush with nothing open" =
   let t = Test_cache.init ~config Resource.Common_args.default in
   let%bind () = close_and_flush t in
-  [%expect {|
+  [%expect
+    {|
     Closing cache
     Closed cache
     |}];
@@ -379,7 +391,8 @@ let%expect_test "close_and_flush closes resources" =
   (* Open a resource *)
   let r0 = Open_resource.create ~now:true t [ 0 ] in
   let%bind (_ : Resource.t) = r0.resource in
-  [%expect {|
+  [%expect
+    {|
     Opening 0,0
     Got resource 0,0
     |}];
@@ -388,7 +401,8 @@ let%expect_test "close_and_flush closes resources" =
   [%expect {| Releasing resource 0,0 |}];
   (* [close_and_flush] should close the idle resource. *)
   let%bind () = close_and_flush t in
-  [%expect {|
+  [%expect
+    {|
     Closing cache
     Closing 0,0
     Closed cache
@@ -406,7 +420,8 @@ let%expect_test "close_and_flush clears queue, waits for all jobs to finish" =
   (* Open a resource *)
   let r0 = Open_resource.create ~now:true t [ 0 ] in
   let%bind (_ : Resource.t) = r0.resource in
-  [%expect {|
+  [%expect
+    {|
     Opening 0,0
     Got resource 0,0
     |}];
@@ -417,14 +432,16 @@ let%expect_test "close_and_flush clears queue, waits for all jobs to finish" =
   assert (Test_cache.close_started t);
   (* The waiting job stops waiting. *)
   let%bind () = waiting_for_r0 in
-  [%expect {|
+  [%expect
+    {|
     Closing cache
     Error getting (0): "Cache is closed"
     |}];
   (* Release the open resource. Now, [closed_and_flushed] will become determined. *)
   let%bind () = r0.release () in
   let%bind () = closed_and_flushed in
-  [%expect {|
+  [%expect
+    {|
     Releasing resource 0,0
     Closing 0,0
     Closed cache
@@ -569,14 +586,16 @@ let%expect_test "close idle resources when at limit" =
   (* Open a resource. *)
   let r0 = Open_resource.create ~now:true t [ 0 ] in
   let%bind r0_resource = r0.resource in
-  [%expect {|
+  [%expect
+    {|
     Opening 0,0
     Got resource 0,0
     |}];
   (* Open another resource with the same key. *)
   let r0' = Open_resource.create ~now:true t [ 0 ] in
   let%bind r0'_resource = r0'.resource in
-  [%expect {|
+  [%expect
+    {|
     Opening 0,1
     Got resource 0,1
     |}];
@@ -591,7 +610,8 @@ let%expect_test "close idle resources when at limit" =
   let r1 = Open_resource.create t [ 1 ] in
   let%bind () = Resource.close_finished r0_resource in
   let%bind (_ : Resource.t) = r1.resource in
-  [%expect {|
+  [%expect
+    {|
     Closing 0,0
     Opening 1,2
     Got resource 1,2
@@ -600,7 +620,8 @@ let%expect_test "close idle resources when at limit" =
   let r1' = Open_resource.create t [ 1 ] in
   let%bind () = Resource.close_finished r0'_resource in
   let%bind (_ : Resource.t) = r1'.resource in
-  [%expect {|
+  [%expect
+    {|
     Closing 0,1
     Opening 1,3
     Got resource 1,3
