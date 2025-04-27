@@ -18,17 +18,17 @@ module type S = sig
   (** [with_ t key ~f] calls [f resource] where [resource] is either:
 
       1) An existing cached resource that was opened with key' such that
-      [R.Key.equal key key']
-      2) A newly opened resource created by [R.open_ key common_args], respecting
-      the limits of [t.config]
+         [R.Key.equal key key']
+      2) A newly opened resource created by [R.open_ key common_args], respecting the
+         limits of [t.config]
 
       Returns an error if:
       - the cache is closed
       - [R.open_] returned an error
       - no resource is obtained before [give_up] is determined
 
-      If [f] raises, the exception is not caught, but the [resource] will be
-      closed and the [Cache] will remain in a working state (no resources are lost). *)
+      If [f] raises, the exception is not caught, but the [resource] will be closed and
+      the [Cache] will remain in a working state (no resources are lost). *)
   val with_
     :  ?open_timeout:Time_ns.Span.t (** default [None] *)
     -> ?give_up:unit Deferred.t (** default [Deferred.never] *)
@@ -52,16 +52,11 @@ module type S = sig
          Deferred.t
 
   (** Like [with_] and [with_'] except [f] is run on the first matching available resource
-      (or the first resource that has availability to be opened).
-
-      Preference is given towards resources earlier in the list, unless
-      [~load_balance:true] has been specified, in which case preference is given to ensure
-      that load is approximately balanced. The key with the least number of open
-      connections will be favored. *)
+      (or the first resource that has availability to be opened). Preference is given
+      towards resources earlier in the list. *)
   val with_any
     :  ?open_timeout:Time_ns.Span.t
     -> ?give_up:unit Deferred.t
-    -> ?load_balance:bool
     -> t
     -> key list
     -> f:(resource -> 'a Deferred.t)
@@ -70,7 +65,6 @@ module type S = sig
   val with_any'
     :  ?open_timeout:Time_ns.Span.t
     -> ?give_up:unit Deferred.t
-    -> ?load_balance:bool
     -> t
     -> key list
     -> f:(resource -> 'a Deferred.t)
@@ -86,7 +80,6 @@ module type S = sig
   val with_any_loop
     :  ?open_timeout:Time_ns.Span.t
     -> ?give_up:unit Deferred.t
-    -> ?load_balance:bool
     -> t
     -> key list
     -> f:(resource -> 'a Deferred.t)
@@ -97,14 +90,24 @@ module type S = sig
        ]
          Deferred.t
 
+  (** This runs a [Deferred.forever] loop for each of the provided keys to create
+      resources to ensure there are always at least [num_resources_to_keep_open_per_key]
+      resources open for each key. *)
+  val keep_cache_warm
+    :  t
+    -> on_error_opening_resource:(key:key -> error:Error.t -> unit)
+    -> num_resources_to_keep_open_per_key:int
+    -> key list
+    -> unit
+
   val close_started : t -> bool
   val close_finished : t -> unit Deferred.t
 
   (** Close all currently open resources and prevent the creation of new ones. All
       subsequent calls to [with_] and [immediate] fail with [`Cache_is_closed]. Any jobs
-      that are waiting for a connection will return with [`Cache_is_closed]. The
-      returned [Deferred.t] is determined when all jobs have finished running and all
-      resources have been closed. *)
+      that are waiting for a connection will return with [`Cache_is_closed]. The returned
+      [Deferred.t] is determined when all jobs have finished running and all resources
+      have been closed. *)
   val close_and_flush : t -> unit Deferred.t
 end
 
@@ -126,24 +129,23 @@ module type Resource_cache = sig
 
       Limits: The cache respects the following limits:
       - No more than [max_resources] are open simultaneously
-      - No more than [max_resources_per_id] are open simultaneously for a given id (args)
-  *)
+      - No more than [max_resources_per_id] are open simultaneously for a given id (args) *)
   module Make (R : Resource.S) () :
     S
     with type key := R.Key.t
      and type common_args := R.Common_args.t
      and type resource := R.t
 
-  (** Wrap a resource that does not natively support a [has_close_started] operation
-      in a simple record to add such tracking. *)
+  (** Wrap a resource that does not natively support a [has_close_started] operation in a
+      simple record to add such tracking. *)
   module Make_simple (R : Resource.Simple) () :
     S
     with type key := R.Key.t
      and type common_args := R.Common_args.t
      and type resource := R.t
 
-  (** Make a cache from a resource where the type clients wish to operate on is
-      derived from, but not necessarily equal to, the type held by the cache. *)
+  (** Make a cache from a resource where the type clients wish to operate on is derived
+      from, but not necessarily equal to, the type held by the cache. *)
   module Make_wrapped (R : Resource.S_wrapped) () :
     S
     with type key := R.Key.t

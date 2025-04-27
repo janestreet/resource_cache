@@ -360,7 +360,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
            It is filled in [set_idle] or [close]. *)
         let result =
           Monitor.try_with ~run:`Schedule ~rest:`Log (fun () ->
-            f (Set_once.get_exn t.resource [%here]))
+            f (Set_once.get_exn t.resource))
         in
         upon result (function
           | Ok _ -> set_idle t
@@ -375,7 +375,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       | `Idle ->
         (* It is possible that [R.close] was called but [R.close_finished] is not
            determined yet. Use [R.is_closed] to prevent this race. *)
-        if R.has_close_started (Set_once.get_exn t.resource [%here])
+        if R.has_close_started (Set_once.get_exn t.resource)
         then `Resource_closed
         else (
           set_state t (`In_use_until (Ivar.create ()));
@@ -460,7 +460,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
             don't_wait_for
               (let%bind () = R.close_finished res in
                close_when_idle t);
-            Set_once.set_exn t.resource [%here] res;
+            Set_once.set_exn t.resource res;
             let%map r = unsafe_immediate t ~f:with_ in
             `Result (key, r))
           else error_or_close_while_opening `Cache_is_closed
@@ -656,6 +656,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       -> [> `Result of R.Key.t * ('a, exn) Result.t | Delayed_failures.t ] Deferred.t
            option
 
+    val any_resource_closed : t -> unit Deferred.t
     val enqueue : t -> 'a Job.t -> unit
     val num_open : t -> int
   end = struct
@@ -669,12 +670,14 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       ; resources : Resource.t Resource.Id.Table.t
       ; waiting_jobs : job Doubly_linked.t
       ; trigger_queue_manager : unit Mvar.Read_write.t
+      ; any_resource_closed_bvar : (unit, read_write) Bvar.t
       ; mutable close_started : bool
       ; close_finished : unit Ivar.t
       ; log_error : string -> unit
       }
 
     let num_open t = Hashtbl.length t.resources
+    let any_resource_closed t = Bvar.wait t.any_resource_closed_bvar
 
     let status t =
       let max_time_on_queue =
@@ -726,6 +729,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
            Hashtbl.remove t.resources (Resource.id resource);
            (* Trigger that capacity is now available *)
            Mvar.set t.trigger_queue_manager ();
+           Bvar.broadcast t.any_resource_closed_bvar ();
            if t.close_started && Hashtbl.is_empty t.resources
            then Ivar.fill_exn t.close_finished ());
           (* Trigger when this resource is now available. This is needed because
@@ -789,6 +793,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
         ; resources = Resource.Id.Table.create ()
         ; waiting_jobs = Doubly_linked.create ()
         ; trigger_queue_manager = Mvar.create ()
+        ; any_resource_closed_bvar = Bvar.create ()
         ; close_started = false
         ; close_finished = Ivar.create ()
         ; log_error
@@ -836,6 +841,12 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
     ; log_error : string -> unit
     }
 
+  let num_open t key =
+    match Hashtbl.find t.cache key with
+    | None -> 0
+    | Some resource_list -> Resource_list.num_open resource_list
+  ;;
+
   let status t =
     let resource_lists = List.map (Hashtbl.data t.cache) ~f:Resource_list.status in
     { Status.resource_lists; num_jobs_in_cache = t.num_jobs_in_cache }
@@ -859,18 +870,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       | `None_until _ -> None)
   ;;
 
-  let create_any_resource ?open_timeout ~load_balance t keys ~f =
-    let keys =
-      if load_balance
-      then (
-        let num_open key =
-          let res_list = get_resource_list t key in
-          Resource_list.num_open res_list
-        in
-        List.stable_sort keys ~compare:(fun key1 key2 ->
-          Int.compare (num_open key1) (num_open key2)))
-      else keys
-    in
+  let create_any_resource ?open_timeout t keys ~f =
     List.find_map keys ~f:(fun key ->
       let res_list = get_resource_list t key in
       Resource_list.create_resource ?open_timeout res_list ~f)
@@ -884,14 +884,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
     Job.result job
   ;;
 
-  let with_any'
-    ?open_timeout
-    ?(give_up = Deferred.never ())
-    ?(load_balance = false)
-    t
-    keys
-    ~f
-    =
+  let with_any' ?open_timeout ?(give_up = Deferred.never ()) t keys ~f =
     let f resource = f (R.underlying resource) in
     t.num_jobs_in_cache <- t.num_jobs_in_cache + 1;
     let raise_and_cleanup exn =
@@ -908,7 +901,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
            | Ok res -> `Ok (args, res)
            | Error exn -> raise_and_cleanup exn)
         | None ->
-          (match create_any_resource ?open_timeout ~load_balance t keys ~f with
+          (match create_any_resource ?open_timeout t keys ~f with
            | Some res ->
              (match%map res with
               | `Result (_key, Error exn) -> raise_and_cleanup exn
@@ -931,8 +924,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
     result
   ;;
 
-  let with_any ?open_timeout ?give_up ?load_balance t keys ~f =
-    match%map with_any' ?open_timeout ?give_up ?load_balance t keys ~f with
+  let with_any ?open_timeout ?give_up t keys ~f =
+    match%map with_any' ?open_timeout ?give_up t keys ~f with
     | `Ok args_and_res -> Ok args_and_res
     | `Error_opening_resource (key, err) ->
       let tag = sprintf !"Error creating required resource: %{sexp:R.Key.t}" key in
@@ -956,11 +949,11 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
     | `Gave_up_waiting_for_resource -> `Gave_up_waiting_for_resource
   ;;
 
-  let with_any_loop ?open_timeout ?give_up ?load_balance t keys ~f =
+  let with_any_loop ?open_timeout ?give_up t keys ~f =
     let rec loop ~failed = function
       | [] -> return (`Error_opening_all_resources (List.rev failed))
       | keys ->
-        (match%bind with_any' ?open_timeout ?give_up ?load_balance t keys ~f with
+        (match%bind with_any' ?open_timeout ?give_up t keys ~f with
          | (`Ok _ | `Gave_up_waiting_for_resource | `Cache_is_closed) as res -> return res
          | `Error_opening_resource (failed_key, e) ->
            let remaining =
@@ -1011,6 +1004,75 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
   let config t = t.config
   let close_started t = t.close_started
   let close_finished t = Ivar.read t.close_finished
+
+  let keep_cache_warm
+    t
+    ~on_error_opening_resource
+    ~num_resources_to_keep_open_per_key
+    keys
+    =
+    if num_resources_to_keep_open_per_key <= 0
+       || num_resources_to_keep_open_per_key > t.config.max_resources_per_id
+       || num_resources_to_keep_open_per_key * List.length keys > t.config.max_resources
+    then
+      raise_s
+        [%message
+          "Invalid value for [num_resources_to_keep_open_per_key] in call to \
+           [Resource_cache.keep_cache_warm]: must be greater than 0, less than or equal \
+           to [config.max_resources_per_id], and [num_resources_to_keep_open_per_key * \
+           List.length keys] must be less than or equal to [config.max_resources]"
+            (num_resources_to_keep_open_per_key : int)
+            (List.length keys : int)
+            (t.config.max_resources_per_id : int)
+            (t.config.max_resources : int)];
+    let wait_until_timeout_or_resource_closed key =
+      Clock_ns.with_timeout
+        (* if for some reason we miss a bvar notification
+           have a timeout so we'll always retry anyway *)
+        (Time_ns.Span.of_sec 60.)
+        (Deferred.any_unit
+           [ close_finished t
+             (* wakeup during shutdown, though [any_resource_closed] should trigger also. *)
+           ; Resource_list.any_resource_closed (get_resource_list t key)
+           ])
+      >>| (ignore : unit Clock_ns.Or_timeout.t -> unit)
+    in
+    let num_to_open key =
+      Int.max (num_resources_to_keep_open_per_key - num_open t key) 0
+    in
+    List.iter keys ~f:(fun key ->
+      Deferred.repeat_until_finished () (fun () ->
+        if close_started t
+        then return (`Finished ())
+        else if num_to_open key <= 0
+        then (
+          let%map () = wait_until_timeout_or_resource_closed key in
+          `Repeat ())
+        else (
+          let resource_list = get_resource_list t key in
+          let%map () =
+            match
+              Resource_list.create_resource resource_list ~f:(fun (_ : R.t) -> return ())
+            with
+            | None ->
+              (* No capacity or cache is closed - we're going to wait for a resource to be closed *)
+              wait_until_timeout_or_resource_closed key
+            | Some res ->
+              (match%bind res with
+               | `Error_opening_resource (key, error) ->
+                 on_error_opening_resource ~key ~error;
+                 return ()
+               | `Result (_key, Error exn) ->
+                 (* This is not possible because the [f] we supply to
+                  [Resource_list.create_resource] just returns unit. *)
+                 raise_s
+                   [%message
+                     "BUG: got an exception when running [f] on resource" (exn : Exn.t)]
+               | `Result (_, Ok ()) | `Cache_is_closed -> return ())
+          in
+          `Repeat ()))
+      |> don't_wait_for)
+  ;;
 end
 
 module Make (R : Resource.S) () = struct

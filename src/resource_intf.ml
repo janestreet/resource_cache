@@ -57,8 +57,8 @@ module type Resource = sig
   module type S_wrapped = S_wrapped
   module type Simple = Simple
 
-  (** Wrap a resource that does not natively support a [has_close_started] operation
-      in a simple record to add such tracking. *)
+  (** Wrap a resource that does not natively support a [has_close_started] operation in a
+      simple record to add such tracking. *)
   module Make_simple (R : Simple) :
     S_wrapped
     with module Key = R.Key
