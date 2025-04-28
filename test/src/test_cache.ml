@@ -2,7 +2,7 @@ open! Core
 open! Async
 open Expect_test_helpers_core
 
-let () = Backtrace.elide := true
+let () = Dynamic.set_root Backtrace.elide true
 
 module Resource = struct
   module Key = Int
@@ -65,9 +65,9 @@ module Test_cache = struct
   ;;
 end
 
-let get_resource ?(give_up = Deferred.never ()) ?load_balance ?r_ivar ~f t args =
+let get_resource ?(give_up = Deferred.never ()) ?r_ivar ~f t args =
   let%map result =
-    Test_cache.with_any ~give_up ?load_balance t args ~f:(fun r ->
+    Test_cache.with_any ~give_up t args ~f:(fun r ->
       printf "Got resource %d,%d\n" (Resource.key r) (Resource.id r);
       Option.iter r_ivar ~f:(fun r_ivar -> Ivar.fill_exn r_ivar r);
       f r)
@@ -102,36 +102,29 @@ module Open_resource : sig
     ; release : unit -> unit Deferred.t
     }
 
-  val create : ?load_balance:bool -> ?now:bool -> Test_cache.t -> int list -> t
+  val create : ?now:bool -> Test_cache.t -> int list -> t
 end = struct
   type t =
     { resource : Resource.t Deferred.t
     ; release : unit -> unit Deferred.t
     }
 
-  let assert_resource_available
-    ?(release = Deferred.unit)
-    ?r_ivar
-    ?give_up
-    ?load_balance
-    t
-    args
-    =
+  let assert_resource_available ?(release = Deferred.unit) ?r_ivar ?give_up t args =
     let f r =
       let%bind () = release in
       printf "Releasing resource %d,%d\n" (Resource.key r) (Resource.id r);
       Deferred.unit
     in
     let r_ivar = r_ivar_or_create r_ivar in
-    let%bind _, () = get_resource ~r_ivar ?give_up ?load_balance ~f t args >>| ok_exn in
+    let%bind _, () = get_resource ~r_ivar ?give_up ~f t args >>| ok_exn in
     Ivar.read r_ivar
   ;;
 
-  let create ?load_balance ?(now = false) t ids =
+  let create ?(now = false) t ids =
     let f =
       if now
-      then assert_resource_available ?load_balance ~give_up:Deferred.unit
-      else assert_resource_available ?load_balance ?give_up:None
+      then assert_resource_available ~give_up:Deferred.unit
+      else assert_resource_available ?give_up:None
     in
     let resource_ivar = Ivar.create () in
     let release_ivar = Ivar.create () in
@@ -449,125 +442,71 @@ let%expect_test "close_and_flush clears queue, waits for all jobs to finish" =
   return ()
 ;;
 
-let test_load_balance ~load_balance =
-  let t =
-    Test_cache.init
-      ~config:
-        { max_resources = 10
-        ; max_resources_per_id = 5
-        ; max_resource_reuse = 1
-        ; idle_cleanup_after = Time_ns.Span.day
-        ; close_idle_resources_when_at_limit = false
-        ; close_resource_on_unhandled_exn = false
-        }
-      Resource.Common_args.default
+let%expect_test "[keep_cache_warm]" =
+  let config =
+    { Resource_cache.Config.max_resources = 5
+    ; idle_cleanup_after = Time_ns.Span.day
+    ; max_resources_per_id = 2
+    ; max_resource_reuse = 5
+    ; close_idle_resources_when_at_limit = false
+    ; close_resource_on_unhandled_exn = true
+    }
   in
-  let%bind () =
-    List.init 10 ~f:(fun (_ : int) ->
-      let r = Open_resource.create ~load_balance ~now:true t [ 0; 1; 2; 3 ] in
-      let%bind (_ : Resource.t) = r.resource in
-      r.release ())
-    |> Deferred.all_unit
+  let t = Test_cache.init ~config Resource.Common_args.default in
+  let keep_cache_warm ~num_resources_to_keep_open_per_key =
+    Test_cache.keep_cache_warm
+      t
+      ~on_error_opening_resource:(fun ~key ~error ->
+        print_s [%message "Error opening resource" (key : int) (error : Error.t)])
+      ~num_resources_to_keep_open_per_key
+      [ 0; 1 ]
   in
-  close_and_flush t
-;;
-
-let%expect_test "without load balancing" =
-  let%bind () = test_load_balance ~load_balance:false in
+  Expect_test_helpers_core.require_does_raise (fun () ->
+    keep_cache_warm ~num_resources_to_keep_open_per_key:0);
   [%expect
     {|
-    Opening 0,0
-    Opening 0,1
-    Opening 0,2
-    Opening 0,3
-    Opening 0,4
-    Opening 1,5
-    Opening 1,6
-    Opening 1,7
-    Opening 1,8
-    Opening 1,9
-    Got resource 0,0
-    Got resource 0,1
-    Got resource 0,2
-    Got resource 0,3
-    Got resource 0,4
-    Got resource 1,5
-    Got resource 1,6
-    Got resource 1,7
-    Got resource 1,8
-    Got resource 1,9
-    Releasing resource 0,0
-    Releasing resource 0,1
-    Releasing resource 0,2
-    Releasing resource 0,3
-    Releasing resource 0,4
-    Releasing resource 1,5
-    Releasing resource 1,6
-    Releasing resource 1,7
-    Releasing resource 1,8
-    Releasing resource 1,9
-    Closing 0,0
-    Closing 0,1
-    Closing 0,2
-    Closing 0,3
-    Closing 0,4
-    Closing 1,5
-    Closing 1,6
-    Closing 1,7
-    Closing 1,8
-    Closing 1,9
-    Closing cache
-    Closed cache
+    ("Invalid value for [num_resources_to_keep_open_per_key] in call to [Resource_cache.keep_cache_warm]: must be greater than 0, less than or equal to [config.max_resources_per_id], and [num_resources_to_keep_open_per_key * List.length keys] must be less than or equal to [config.max_resources]"
+     (num_resources_to_keep_open_per_key 0)
+     ("List.length keys"                 2)
+     ("(t.config).max_resources_per_id"  2)
+     ("(t.config).max_resources"         5))
     |}];
-  return ()
-;;
-
-let%expect_test "with load balancing" =
-  let%bind () = test_load_balance ~load_balance:true in
+  Expect_test_helpers_core.require_does_raise (fun () ->
+    keep_cache_warm ~num_resources_to_keep_open_per_key:3);
+  [%expect
+    {|
+    ("Invalid value for [num_resources_to_keep_open_per_key] in call to [Resource_cache.keep_cache_warm]: must be greater than 0, less than or equal to [config.max_resources_per_id], and [num_resources_to_keep_open_per_key * List.length keys] must be less than or equal to [config.max_resources]"
+     (num_resources_to_keep_open_per_key 3)
+     ("List.length keys"                 2)
+     ("(t.config).max_resources_per_id"  2)
+     ("(t.config).max_resources"         5))
+    |}];
+  (* Warming the cache opens up 2 resources for each of keys 0 and 1 *)
+  keep_cache_warm ~num_resources_to_keep_open_per_key:2;
+  let%bind () = Scheduler.yield_until_no_jobs_remain () in
   [%expect
     {|
     Opening 0,0
     Opening 1,1
-    Opening 2,2
-    Opening 3,3
-    Opening 0,4
-    Opening 1,5
-    Opening 2,6
-    Opening 3,7
-    Opening 0,8
-    Opening 1,9
+    Opening 0,2
+    Opening 1,3
+    |}];
+  (* Opening a resource will get one in the cache *)
+  let r0 = Open_resource.create ~now:true t [ 0 ] in
+  let%bind () = r0.release () in
+  [%expect
+    {|
     Got resource 0,0
-    Got resource 1,1
-    Got resource 2,2
-    Got resource 3,3
-    Got resource 0,4
-    Got resource 1,5
-    Got resource 2,6
-    Got resource 3,7
-    Got resource 0,8
-    Got resource 1,9
     Releasing resource 0,0
-    Releasing resource 1,1
-    Releasing resource 2,2
-    Releasing resource 3,3
-    Releasing resource 0,4
-    Releasing resource 1,5
-    Releasing resource 2,6
-    Releasing resource 3,7
-    Releasing resource 0,8
-    Releasing resource 1,9
+    |}];
+  (* When we close the resource, the cache warming will open up another one *)
+  let%bind r0_resource = r0.resource in
+  let%bind () = Resource.close r0_resource in
+  let%bind () = Scheduler.yield_until_no_jobs_remain () in
+  [%expect
+    {|
     Closing 0,0
-    Closing 1,1
-    Closing 2,2
-    Closing 3,3
-    Closing 0,4
-    Closing 1,5
-    Closing 2,6
-    Closing 3,7
-    Closing 0,8
-    Closing 1,9
-    Closing cache
-    Closed cache
+    Opening 0,4
     |}];
   return ()
 ;;
