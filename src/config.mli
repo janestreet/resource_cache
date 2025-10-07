@@ -8,10 +8,10 @@ type t =
   ; max_resources_per_id : int
   ; max_resource_reuse : int
   ; close_idle_resources_when_at_limit : bool
-      (** The cache will close the least recently used idle resource when there is pressure at
+  (** The cache will close the least recently used idle resource when there is pressure at
       the [max_resources] limit. *)
   ; close_resource_on_unhandled_exn : bool
-      (** if [close_resource_on_unhandled_exn] is set to true, when the resource raises an exn
+  (** if [close_resource_on_unhandled_exn] is set to true, when the resource raises an exn
       after creation, it will be [close]d. *)
   }
 [@@deriving compare, sexp_of]

@@ -1,5 +1,6 @@
 (library
  (name test_resource_cache)
- (libraries core async expect_test_helpers_core resource_cache)
+ (libraries core async expect_test_helpers_core resource_cache
+   core_unix.time_float_unix)
  (preprocess
   (pps ppx_jane)))

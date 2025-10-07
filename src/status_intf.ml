@@ -41,8 +41,8 @@ module type S = sig
 
   module Make_stable : sig
     module V1 (Key : sig
-      type t = Key.t [@@deriving sexp, bin_io]
-    end) : sig
+        type t = Key.t [@@deriving sexp, bin_io]
+      end) : sig
       type nonrec t = t [@@deriving sexp, bin_io]
     end
   end
