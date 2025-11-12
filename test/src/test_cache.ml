@@ -56,12 +56,24 @@ module Resource = struct
   let close_finished t = Ivar.read t.close_finished
 end
 
+let sort_expect_test_output () =
+  let output = Expect_test_helpers_core.expect_test_output () in
+  List.iter
+    ~f:print_endline
+    (List.sort ~compare:String.compare (String.split_lines output))
+;;
+
 module Test_cache = struct
   include Resource_cache.Make (Resource) ()
 
   let init ~config k =
     Resource.counter := 0;
     init ~config ~log_error:(Log.Global.string ~level:`Error) k
+  ;;
+
+  let close_all_resources_for_key t key =
+    let%map () = close_all_resources_for_key t key in
+    sort_expect_test_output ()
   ;;
 end
 
@@ -487,8 +499,8 @@ let%expect_test "[keep_cache_warm]" =
   [%expect
     {|
     Opening 0,0
-    Opening 1,1
-    Opening 0,2
+    Opening 0,1
+    Opening 1,2
     Opening 1,3
     |}];
   (* Opening a resource will get one in the cache *)
@@ -508,6 +520,81 @@ let%expect_test "[keep_cache_warm]" =
     Closing 0,0
     Opening 0,4
     |}];
+  return ()
+;;
+
+let%expect_test "[warm_cache]" =
+  let config =
+    { Resource_cache.Config.max_resources = 5
+    ; idle_cleanup_after = Time_ns.Span.day
+    ; max_resources_per_id = 2
+    ; max_resource_reuse = 5
+    ; close_idle_resources_when_at_limit = false
+    ; close_resource_on_unhandled_exn = true
+    }
+  in
+  let t = Test_cache.init ~config Resource.Common_args.default in
+  let warm_cache ~num_resources_to_keep_open_per_key =
+    Test_cache.warm_cache
+      t
+      ~on_error_opening_resource:(fun ~key ~error ->
+        print_s [%message "Error opening resource" (key : int) (error : Error.t)])
+      ~num_resources_to_keep_open_per_key
+      [ 0; 1 ]
+  in
+  (* Test validation - same as keep_cache_warm *)
+  Expect_test_helpers_core.require_does_raise (fun () ->
+    warm_cache ~num_resources_to_keep_open_per_key:0 |> Deferred.ignore_m);
+  [%expect
+    {|
+    ("Invalid value for [num_resources_to_keep_open_per_key] in call to [Resource_cache.warm_cache]: must be greater than 0, less than or equal to [config.max_resources_per_id], and [num_resources_to_keep_open_per_key * List.length keys] must be less than or equal to [config.max_resources]"
+     (num_resources_to_keep_open_per_key 0)
+     ("List.length keys"                 2)
+     ("(t.config).max_resources_per_id"  2)
+     ("(t.config).max_resources"         5))
+    |}];
+  Expect_test_helpers_core.require_does_raise (fun () ->
+    warm_cache ~num_resources_to_keep_open_per_key:3 |> Deferred.ignore_m);
+  [%expect
+    {|
+    ("Invalid value for [num_resources_to_keep_open_per_key] in call to [Resource_cache.warm_cache]: must be greater than 0, less than or equal to [config.max_resources_per_id], and [num_resources_to_keep_open_per_key * List.length keys] must be less than or equal to [config.max_resources]"
+     (num_resources_to_keep_open_per_key 3)
+     ("List.length keys"                 2)
+     ("(t.config).max_resources_per_id"  2)
+     ("(t.config).max_resources"         5))
+    |}];
+  (* Warming the cache opens up 2 resources for each of keys 0 and 1 *)
+  let%bind () = warm_cache ~num_resources_to_keep_open_per_key:2 in
+  [%expect
+    {|
+    Opening 0,0
+    Opening 0,1
+    Opening 1,2
+    Opening 1,3
+    |}];
+  (* Opening a resource will get one in the cache *)
+  let r0 = Open_resource.create ~now:true t [ 0 ] in
+  let%bind () = r0.release () in
+  [%expect
+    {|
+    Got resource 0,0
+    Releasing resource 0,0
+    |}];
+  (* Unlike keep_cache_warm, warm_cache doesn't run a loop, so closing a resource
+     doesn't trigger opening a new one *)
+  let%bind r0_resource = r0.resource in
+  let%bind () = Resource.close r0_resource in
+  let%bind () = Scheduler.yield_until_no_jobs_remain () in
+  [%expect {| Closing 0,0 |}];
+  (* But we can call warm_cache again to re-warm *)
+  let%bind () = warm_cache ~num_resources_to_keep_open_per_key:2 in
+  [%expect {| Opening 0,4 |}];
+  (* If we already have enough resources, warm_cache is a no-op *)
+  let%bind () = warm_cache ~num_resources_to_keep_open_per_key:2 in
+  [%expect {| |}];
+  (* We can warm to a lower number - it won't close existing resources *)
+  let%bind () = warm_cache ~num_resources_to_keep_open_per_key:1 in
+  [%expect {| |}];
   return ()
 ;;
 
@@ -633,5 +720,209 @@ let%expect_test "regression test: don't hang if open_ is in progress when \
   Ivar.fill_exn block_open_until ();
   let%bind () = closing in
   [%expect {| Closed cache |}];
+  return ()
+;;
+
+let%expect_test "close_all_resources_for_key - basic functionality" =
+  let t = Test_cache.init ~config Resource.Common_args.default in
+  (* Open resources for keys 0 and 1 *)
+  let r0 = Open_resource.create ~now:true t [ 0 ] in
+  let%bind (_ : Resource.t) = r0.resource in
+  [%expect
+    {|
+    Opening 0,0
+    Got resource 0,0
+    |}];
+  let r1 = Open_resource.create ~now:true t [ 1 ] in
+  let%bind (_ : Resource.t) = r1.resource in
+  [%expect
+    {|
+    Opening 1,1
+    Got resource 1,1
+    |}];
+  (* Release both resources *)
+  let%bind () = r0.release () in
+  [%expect {| Releasing resource 0,0 |}];
+  let%bind () = r1.release () in
+  [%expect {| Releasing resource 1,1 |}];
+  (* Close all resources for key 0 *)
+  let%bind () = Test_cache.close_all_resources_for_key t 0 in
+  [%expect {| Closing 0,0 |}];
+  (* Key 0 can be used again - it will open a new resource *)
+  let r0' = Open_resource.create t [ 0 ] in
+  let%bind (_ : Resource.t) = r0'.resource in
+  [%expect
+    {|
+    Opening 0,2
+    Got resource 0,2
+    |}];
+  (* Key 1 should still have its cached resource *)
+  let r1' = Open_resource.create ~now:true t [ 1 ] in
+  let%bind (_ : Resource.t) = r1'.resource in
+  [%expect {| Got resource 1,1 |}];
+  return ()
+;;
+
+let%expect_test "close_all_resources_for_key - non-existent key" =
+  let t = Test_cache.init ~config Resource.Common_args.default in
+  (* Closing resources for a non-existent key should be a no-op *)
+  let%bind () = Test_cache.close_all_resources_for_key t 99 in
+  [%expect {| |}];
+  (* Cache should still work normally *)
+  let r0 = Open_resource.create ~now:true t [ 0 ] in
+  let%bind (_ : Resource.t) = r0.resource in
+  [%expect
+    {|
+    Opening 0,0
+    Got resource 0,0
+    |}];
+  return ()
+;;
+
+let%expect_test "close_all_resources_for_key - waits for busy resources" =
+  let t = Test_cache.init ~config Resource.Common_args.default in
+  (* Open a resource and keep it busy *)
+  let r0 = Open_resource.create ~now:true t [ 0 ] in
+  let%bind (_ : Resource.t) = r0.resource in
+  [%expect
+    {|
+    Opening 0,0
+    Got resource 0,0
+    |}];
+  (* Start closing all resources for key 0 (should wait for r0 to be released) *)
+  let closing = Test_cache.close_all_resources_for_key t 0 in
+  let%bind () = Scheduler.yield_until_no_jobs_remain () in
+  [%expect {| |}];
+  (* The resource should not be closed yet *)
+  let%bind () = r0.release () in
+  [%expect
+    {|
+    Releasing resource 0,0
+    Closing 0,0
+    |}];
+  (* Now closing should complete *)
+  let%bind () = closing in
+  [%expect {| |}];
+  return ()
+;;
+
+let%expect_test "close_all_resources_for_key - multiple resources for same key" =
+  let config =
+    { Resource_cache.Config.max_resources = 5
+    ; idle_cleanup_after = Time_ns.Span.day
+    ; max_resources_per_id = 3
+    ; max_resource_reuse = 10
+    ; close_idle_resources_when_at_limit = false
+    ; close_resource_on_unhandled_exn = true
+    }
+  in
+  let t = Test_cache.init ~config Resource.Common_args.default in
+  (* Open multiple resources for key 0 *)
+  let r0_1 = Open_resource.create ~now:true t [ 0 ] in
+  let%bind (_ : Resource.t) = r0_1.resource in
+  [%expect
+    {|
+    Opening 0,0
+    Got resource 0,0
+    |}];
+  let r0_2 = Open_resource.create ~now:true t [ 0 ] in
+  let%bind (_ : Resource.t) = r0_2.resource in
+  [%expect
+    {|
+    Opening 0,1
+    Got resource 0,1
+    |}];
+  let r0_3 = Open_resource.create ~now:true t [ 0 ] in
+  let%bind (_ : Resource.t) = r0_3.resource in
+  [%expect
+    {|
+    Opening 0,2
+    Got resource 0,2
+    |}];
+  (* Release all resources *)
+  let%bind () = r0_1.release () in
+  [%expect {| Releasing resource 0,0 |}];
+  let%bind () = r0_2.release () in
+  [%expect {| Releasing resource 0,1 |}];
+  let%bind () = r0_3.release () in
+  [%expect {| Releasing resource 0,2 |}];
+  (* Close all resources for key 0 - should close all three *)
+  let%bind () = Test_cache.close_all_resources_for_key t 0 in
+  [%expect
+    {|
+    Closing 0,0
+    Closing 0,1
+    Closing 0,2
+    |}];
+  return ()
+;;
+
+let%expect_test "close_all_resources_for_key - jobs waiting for resources" =
+  let t = Test_cache.init ~config Resource.Common_args.default in
+  (* Open a resource *)
+  let r0 = Open_resource.create ~now:true t [ 0 ] in
+  let%bind (_ : Resource.t) = r0.resource in
+  [%expect
+    {|
+    Opening 0,0
+    Got resource 0,0
+    |}];
+  (* Start a job waiting for resource 0 *)
+  let waiting_for_r0 = Open_resource.create ~now:false t [ 0 ] in
+  (* Close all resources for key 0 *)
+  let closing = Test_cache.close_all_resources_for_key t 0 in
+  (* allow the scheduler to run *)
+  let%bind () = Scheduler.yield_until_no_jobs_remain () in
+  (* The resource is blocked until the previous resource gets released. *)
+  print_s [%sexp (Deferred.is_determined waiting_for_r0.resource : bool)];
+  [%expect {| false |}];
+  (* Release the resource so closing can complete *)
+  let%bind () = r0.release () in
+  [%expect
+    {|
+    Releasing resource 0,0
+    Closing 0,0
+    |}];
+  let%bind () = closing in
+  [%expect {| Opening 0,1 |}];
+  (* and now the resource we requested earlier will become available as expected. *)
+  let%bind (_ : Resource.t) = waiting_for_r0.resource in
+  [%expect {| Got resource 0,1 |}];
+  return ()
+;;
+
+let%expect_test "keep_warm works with close_all_resources_for_key" =
+  let t =
+    Test_cache.init
+      ~config:{ config with max_resources_per_id = 10 }
+      Resource.Common_args.default
+  in
+  Test_cache.keep_cache_warm
+    t
+    ~on_error_opening_resource:(fun ~key ~error ->
+      print_s [%message "Error opening resource" (key : int) (error : Error.t)])
+    ~num_resources_to_keep_open_per_key:2
+    [ 0 ];
+  (* wait for the initial resources to get opened. *)
+  let%bind () = Scheduler.yield_until_no_jobs_remain () in
+  [%expect
+    {|
+    Opening 0,0
+    Opening 0,1
+    |}];
+  (* close all the currently open resources *)
+  let%bind () = Test_cache.close_all_resources_for_key t 0 in
+  [%expect
+    {|
+    Closing 0,0
+    Closing 0,1
+    |}];
+  (* wait for new resources to get opened. *)
+  let%bind () = Scheduler.yield_until_no_jobs_remain () in
+  [%expect
+    {|
+    Opening 0,2
+    Opening 0,3
+    |}];
   return ()
 ;;
