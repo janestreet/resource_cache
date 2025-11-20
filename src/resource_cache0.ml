@@ -200,15 +200,14 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
 
     val id : t -> Id.t
 
-    (* [create] will immediately produce a [Resource.t] that is initially
-       busy with:
+    (* [create] will immediately produce a [Resource.t] that is initially busy with:
        - calling [R.open_]
        - calling [immediate ~f:with_] with the resource created (if successful)
 
-       If [R.open_] fails, this resource is immediately closed
-       otherwise the resource will become idle after the initial use.
+       If [R.open_] fails, this resource is immediately closed otherwise the resource will
+       become idle after the initial use.
 
-       @see [immediate]. *)
+       \@see [immediate]. *)
 
     val create
       :  ?open_timeout:Time_ns.Span.t
@@ -227,9 +226,9 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
 
     val close_when_idle : t -> unit Deferred.t
 
-    (* [close_finished] becomes determined when this [Resource] has been closed.
-       We guarantee that this will become determined, even if the underlying
-       resource implementation is not well behaved. *)
+    (* [close_finished] becomes determined when this [Resource] has been closed. We
+       guarantee that this will become determined, even if the underlying resource
+       implementation is not well behaved. *)
 
     val close_finished : t -> unit Deferred.t
 
@@ -356,8 +355,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
         assert (Ivar.is_empty done_);
         assert (t.remaining_uses > 0);
         t.remaining_uses <- t.remaining_uses - 1;
-        (* deliberately not filling [done_] here.
-           It is filled in [set_idle] or [close]. *)
+        (* deliberately not filling [done_] here. It is filled in [set_idle] or [close]. *)
         let result =
           Monitor.try_with ~run:`Schedule ~rest:`Log (fun () ->
             f (Set_once.get_exn t.resource))
@@ -500,8 +498,8 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       match Lru.remove t (Resource.id resource) with
       | `Ok -> ()
       | `No_such_key ->
-        (* This can occur because [close_least_recently_used] removes from the queue and
-           a subsequent state update comes later. *)
+        (* This can occur because [close_least_recently_used] removes from the queue and a
+           subsequent state update comes later. *)
         ()
     ;;
 
@@ -528,8 +526,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
 
     val create : Config.t -> t
 
-    (* create a single resource, and block a slot until the resource has been cleaned
-       up *)
+    (* create a single resource, and block a slot until the resource has been cleaned up *)
 
     val create_resource
       :  ?open_timeout:Time_ns.Span.t
@@ -1034,12 +1031,10 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
       (* No resources for this key - nothing to do *)
       return ()
     | This resource_list ->
-      (* Close all currently open resources. 
-         We do not remove this from the table here so we
-         continue to account for the open resources as they
-         get cleaned up and so that any queued jobs will
-         continue to work as intended.
-         This will get cleaned up once all connections have been closed. *)
+      (* Close all currently open resources. We do not remove this from the table here so
+         we continue to account for the open resources as they get cleaned up and so that
+         any queued jobs will continue to work as intended. This will get cleaned up once
+         all connections have been closed. *)
       Resource_list.close_all_resources resource_list
   ;;
 
@@ -1086,9 +1081,9 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
                Resource_list.create_resource resource_list ~f:(fun (_ : R.t) -> return ())
              with
              | None ->
-               (* We hit the global capacity limit - it can't be the per-key limit or
-                  the whole cache being closed, because we checked above and haven't
-                  yielded yet.
+               (* We hit the global capacity limit - it can't be the per-key limit or the
+                  whole cache being closed, because we checked above and haven't yielded
+                  yet.
 
                   Either way, there's nothing we can do here. *)
                return ()
@@ -1099,7 +1094,7 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
                 | `Result ((_ : R.Key.t), Ok ()) | `Cache_is_closed -> ()
                 | `Result ((_ : R.Key.t), Error exn) ->
                   (* This is not possible because the [f] we supply to
-                       [Resource_list.create_resource] just returns unit. *)
+                     [Resource_list.create_resource] just returns unit. *)
                   raise_s
                     [%message
                       "BUG: got an exception when running [f] on resource" (exn : Exn.t)]))))
@@ -1136,12 +1131,13 @@ module Make_wrapped (R : Resource.S_wrapped) () = struct
     List.iter keys ~f:(fun key ->
       let wait_until_timeout_or_resource_closed () =
         Clock_ns.with_timeout
-          (* if for some reason we miss a bvar notification
-           have a timeout so we'll always retry anyway *)
+          (* if for some reason we miss a bvar notification have a timeout so we'll always
+             retry anyway *)
           (Time_ns.Span.of_sec 60.)
           (Deferred.any_unit
              [ close_finished t
-               (* wakeup during shutdown, though [any_resource_closed] should trigger also. *)
+               (* wakeup during shutdown, though [any_resource_closed] should trigger
+                  also. *)
              ; Resource_list.any_resource_closed (get_resource_list t key)
              ])
         >>| (ignore : unit Clock_ns.Or_timeout.t -> unit)

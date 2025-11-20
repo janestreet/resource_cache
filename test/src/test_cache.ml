@@ -430,7 +430,7 @@ let%expect_test "close_and_flush clears queue, waits for all jobs to finish" =
     Opening 0,0
     Got resource 0,0
     |}];
-  (* Start waiting for resource 0  *)
+  (* Start waiting for resource 0 *)
   let waiting_for_r0 = assert_no_resource_available t [ 0 ] in
   (* [close_and_flush] while there is a job waiting for a resource. *)
   let closed_and_flushed = close_and_flush t in
@@ -580,8 +580,8 @@ let%expect_test "[warm_cache]" =
     Got resource 0,0
     Releasing resource 0,0
     |}];
-  (* Unlike keep_cache_warm, warm_cache doesn't run a loop, so closing a resource
-     doesn't trigger opening a new one *)
+  (* Unlike keep_cache_warm, warm_cache doesn't run a loop, so closing a resource doesn't
+     trigger opening a new one *)
   let%bind r0_resource = r0.resource in
   let%bind () = Resource.close r0_resource in
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
@@ -631,8 +631,8 @@ let%expect_test "close idle resources when at limit" =
   (* Release the second resource. *)
   let%bind () = r0'.release () in
   [%expect {| Releasing resource 0,1 |}];
-  (* There are 2 idle resources. [r0] is the least recently used. Trying to get a
-     resource with key 1 results in closing [r0] to make room. *)
+  (* There are 2 idle resources. [r0] is the least recently used. Trying to get a resource
+     with key 1 results in closing [r0] to make room. *)
   let r1 = Open_resource.create t [ 1 ] in
   let%bind () = Resource.close_finished r0_resource in
   let%bind (_ : Resource.t) = r1.resource in
