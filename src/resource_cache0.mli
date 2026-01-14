@@ -1,1 +1,1 @@
-include Resource_cache_intf.Resource_cache
+include Resource_cache_intf.Resource_cache (** @inline *)

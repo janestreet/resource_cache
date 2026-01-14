@@ -92,13 +92,24 @@ module type S = sig
 
   (** This runs a [Deferred.forever] loop for each of the provided keys to create
       resources to ensure there are always at least [num_resources_to_keep_open_per_key]
-      resources open for each key. *)
+      resources open for each key.
+
+      If you just want to do this a single time, or have your own loop, see [warm_cache]. *)
   val keep_cache_warm
     :  t
     -> on_error_opening_resource:(key:key -> error:Error.t -> unit)
     -> num_resources_to_keep_open_per_key:int
     -> key list
     -> unit
+
+  (** For each of the provided keys, ensure there are at least
+      [num_resources_to_keep_open_per_key] open. *)
+  val warm_cache
+    :  t
+    -> on_error_opening_resource:(key:key -> error:Error.t -> unit)
+    -> num_resources_to_keep_open_per_key:int
+    -> key list
+    -> unit Deferred.t
 
   val close_started : t -> bool
   val close_finished : t -> unit Deferred.t
@@ -109,6 +120,27 @@ module type S = sig
       [Deferred.t] is determined when all jobs have finished running and all resources
       have been closed. *)
   val close_and_flush : t -> unit Deferred.t
+
+  (** Close all resources associated with a specific key and remove them from the cache,
+      ensuring that all further use of this key will receive fresh resources.
+
+      This will:
+      1. Mark all current resources for the key as closing
+      2. Close all idle resources for the key immediately
+      3. Wait for currently-running jobs using those resources to complete and the
+         resource to close.
+
+      Returns a deferred that becomes determined when all current resources for the key
+      have closed. If the are no current resources for the key returns immediately.
+
+      Note: Any tasks already waiting on a resource to become available will remain and
+      will be fulfilled with fresh resources (as existing tasks complete and new slots
+      become available.)
+
+      Note: If [keep_cache_warm] is running for this key, it will recreate resources after
+      they are closed. The caller is responsible for managing the interaction between
+      warming and closing. *)
+  val close_all_resources_for_key : t -> key -> unit Deferred.t
 end
 
 module type Resource_cache = sig
