@@ -657,8 +657,9 @@ let%expect_test "close idle resources when at limit" =
 
 let%expect_test "raise after open" =
   Log.Global.set_output
-    [ Log.For_testing.create_output ~map_output:(fun x ->
-        Sexp.to_string_hum (Sexp.of_string x))
+    [ Log.For_testing.create_output
+        ~map_output:(fun x -> Sexp.to_string_hum (Sexp.of_string x))
+        ()
     ];
   let test ~close_resource_on_unhandled_exn =
     let config =
@@ -703,8 +704,9 @@ let%expect_test "regression test: don't hang if open_ is in progress when \
                  close_and_flush is called"
   =
   Log.Global.set_output
-    [ Log.For_testing.create_output ~map_output:(fun x ->
-        Sexp.to_string_hum (Sexp.of_string x))
+    [ Log.For_testing.create_output
+        ~map_output:(fun x -> Sexp.to_string_hum (Sexp.of_string x))
+        ()
     ];
   let block_open_until = Ivar.create () in
   let t = Test_cache.init ~config { block_open_until = Ivar.read block_open_until } in
